@@ -1,0 +1,96 @@
+{
+  "Browsers": {
+    "Chrome": {
+      "ProcessName": [
+        "chrome"
+      ],
+      "RegistryDetection": [
+        "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe",
+        "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe"
+      ],
+      "RelativePaths": [
+        "AppData\\Local\\Google\\Chrome\\User Data\\*\\Cache",
+        "AppData\\Local\\Google\\Chrome\\User Data\\*\\Cache\\Cache_Data",
+        "AppData\\Local\\Google\\Chrome\\User Data\\*\\Media Cache",
+        "AppData\\Local\\Google\\Chrome\\User Data\\*\\Code Cache"
+      ]
+    },
+    "Edge": {
+      "ProcessName": [
+        "msedge"
+      ],
+      "RegistryDetection": [
+        "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe",
+        "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe"
+      ],
+      "RelativePaths": [
+        "AppData\\Local\\Microsoft\\Edge\\User Data\\*\\Cache",
+        "AppData\\Local\\Microsoft\\Edge\\User Data\\*\\Cache\\Cache_Data"
+      ]
+    },
+    "IE": {
+      "ProcessName": [
+        "iexplore"
+      ],
+      "RegistryDetection": [
+        "HKLM:\\SOFTWARE\\Microsoft\\Internet Explorer"
+      ],
+      "RelativePaths": [
+        "AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files",
+        "AppData\\Local\\Microsoft\\Windows\\WebCache",
+        "AppData\\Local\\Microsoft\\Windows\\INetCache\\Content.IE5",
+        "AppData\\Local\\Microsoft\\Windows\\INetCache\\Low\\Content.IE5",
+        "AppData\\Local\\Microsoft\\Internet Explorer\\DOMStore"
+      ]
+    },
+    "Firefox": {
+      "ProcessName": [
+        "firefox"
+      ],
+      "RegistryDetection": [
+        "HKLM:\\SOFTWARE\\Mozilla\\Mozilla Firefox",
+        "HKLM:\\SOFTWARE\\WOW6432Node\\Mozilla\\Mozilla Firefox"
+      ],
+      "RelativePaths": [
+        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\cache",
+        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\cache2\\entries",
+        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\thumbnails",
+        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\webappsstore.sqlite",
+        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\chromeappsstore.sqlite"
+      ]
+    }
+  },
+  "Teams": {
+    "Classic": {
+      "ProcessName": [
+        "Teams"
+      ],
+      "RegistryDetection": [
+        "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Teams",
+        "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Teams"
+      ],
+      "RelativePaths": [
+        "AppData\\Roaming\\Microsoft\\Teams\\blob_storage",
+        "AppData\\Roaming\\Microsoft\\Teams\\databases",
+        "AppData\\Roaming\\Microsoft\\Teams\\cache",
+        "AppData\\Roaming\\Microsoft\\Teams\\gpucache",
+        "AppData\\Roaming\\Microsoft\\Teams\\Indexeddb",
+        "AppData\\Roaming\\Microsoft\\Teams\\Local Storage",
+        "AppData\\Roaming\\Microsoft\\Teams\\tmp"
+      ]
+    },
+    "New": {
+      "ProcessName": [
+        "ms-teams"
+      ],
+      "RegistryDetection": [
+        "HKCU:\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages\\MSTeams_*"
+      ],
+      "RelativePaths": [
+        "AppData\\Local\\Packages\\MSTeams_*\\LocalCache\\Microsoft\\MSTeams\\EBWebView\\Default\\Cache",
+        "AppData\\Local\\Packages\\MSTeams_*\\LocalCache\\Microsoft\\MSTeams\\EBWebView\\Default\\Code Cache",
+        "AppData\\Local\\Packages\\MSTeams_*\\TempState"
+      ]
+    }
+  }
+}
