@@ -203,9 +203,11 @@ function Invoke-ComputerCleanup {
         # Execute cleanup functions based on switches
         if ($CleanManager) {
             try {
+                Write-Information '=== STARTED : Windows Disk Cleanup (this may take a while)'
                 Write-Verbose '=== STARTED : Windows Disk Cleanup (this may take a while)'
                 $Result = Invoke-CleanManager -Force:$Force
                 if ($Result) { $Results.Add($Result) }
+                Write-Information '=== FINISHED: Windows Disk Cleanup'
                 Write-Verbose '=== FINISHED: Windows Disk Cleanup'
             }
             catch {
@@ -225,51 +227,65 @@ function Invoke-ComputerCleanup {
                 $UserParams.ArchiveTypes = $ArchiveTypes
             }
 
+            Write-Information '=== STARTED : Cleaning User Profiles'
             Write-Verbose '=== STARTED : Cleaning User Profiles'
             $Result = Optimize-UserProfiles @UserParams
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning User Profiles'
             Write-Verbose '=== FINISHED: Cleaning User Profiles'
         }
 
         if ($SystemTemp) {
+            Write-Information '=== STARTED : Cleaning System files'
             Write-Verbose '=== STARTED : Cleaning System files'
             $Result = Optimize-SystemFiles -Days $Days -TempFiles -Force:$Force
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning System files'
             Write-Verbose '=== FINISHED: Cleaning System files'
         }
 
         if ($SoftwareDistribution) {
+            Write-Information '=== STARTED : Cleaning SoftwareDistribution Download folder'
             Write-Verbose '=== STARTED : Cleaning SoftwareDistribution Download folder'
             $Result = Clear-SoftwareDistribution -Force:$Force
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning SoftwareDistribution Download folder'
             Write-Verbose '=== FINISHED: Cleaning SoftwareDistribution Download folder'
         }
 
         if ($FontCache) {
+            Write-Information '=== STARTED : Cleaning Font Cache'
             Write-Verbose '=== STARTED : Cleaning Font Cache'
             $Result = Clear-FontCache -Force:$Force
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning Font Cache'
             Write-Verbose '=== FINISHED: Cleaning Font Cache'
         }
 
         if ($TeamsCache) {
+            Write-Information '=== STARTED : Cleaning Teams cache'
             Write-Verbose '=== STARTED : Cleaning Teams cache'
             $Result = Clear-TeamsCache -Force:$Force
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning Teams cache'
             Write-Verbose '=== FINISHED: Cleaning Teams cache'
         }
 
         if ($BrowserCache) {
+            Write-Information '=== STARTED : Cleaning Browser Cache'
             Write-Verbose '=== STARTED : Cleaning Browser Cache'
             $Result = Clear-BrowserCache -Force:$Force
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning Browser Cache'
             Write-Verbose '=== FINISHED: Cleaning Browser Cache'
         }
 
         if ($RecycleBin) {
+            Write-Information '=== STARTED : Cleaning Recycle Bin'
             Write-Verbose '=== STARTED : Cleaning Recycle Bin'
             $Result = Optimize-SystemFiles -Days $Days -RecycleBin -Force:$Force
             if ($Result) { $Results.Add($Result) }
+            Write-Information '=== FINISHED: Cleaning Recycle Bin'
             Write-Verbose '=== FINISHED: Cleaning Recycle Bin'
         }
 
@@ -328,3 +344,4 @@ function Invoke-ComputerCleanup {
         $Results.ToArray()
     }
 }
+

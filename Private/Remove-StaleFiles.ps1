@@ -43,12 +43,12 @@ function Remove-StaleFiles {
     )
 
     begin {
-        if ($AgeMode -ne 'None' -and -not $CutoffDate) {
+        if ($AgeMode -ne 'None' -and $null -eq $CutoffDate) {
             throw 'CutoffDate is required when AgeMode is not None.'
         }
 
-        $CutoffUtc = if ($CutoffDate) {
-            $CutoffDate.Value.ToUniversalTime()
+        $CutoffUtc = if ($null -ne $CutoffDate) {
+            ([datetime] $CutoffDate).ToUniversalTime()
         }
         else {
             [datetime]::MinValue
@@ -185,6 +185,8 @@ function Remove-StaleFiles {
         }
     }
 }
+
+
 
 
 

@@ -153,10 +153,36 @@ function Invoke-CleanManager {
         if ($PSCmdlet.ShouldProcess('cleanmgr.exe /sagerun:1', 'Run Disk Cleanup')) {
             try {
                 Write-Verbose 'Running CleanMgr.exe...'
-                Start-Process -FilePath $CleanMgrPath -ArgumentList '/sagerun:1' -NoNewWindow -Wait
 
-                Write-Verbose 'Waiting for CleanMgr and DismHost processes...'
-                Get-Process -Name cleanmgr, dismhost -ErrorAction SilentlyContinue | Wait-Process
+                $ExistingDismHostIds = @(
+                    Get-Process -Name 'dismhost' -ErrorAction SilentlyContinue |
+                        Select-Object -ExpandProperty Id
+                )
+
+                $CleanMgrProcess = Start-Process -FilePath $CleanMgrPath -ArgumentList '/sagerun:1' -NoNewWindow -PassThru
+                Wait-Process -Id $CleanMgrProcess.Id -ErrorAction SilentlyContinue
+
+                Write-Verbose 'Waiting for new DismHost cleanup processes to finish...'
+                $DismHostTimeoutSeconds = 900
+                $Deadline = (Get-Date).AddSeconds($DismHostTimeoutSeconds)
+
+                do {
+                    $NewDismHost = @(
+                        Get-Process -Name 'dismhost' -ErrorAction SilentlyContinue |
+                            Where-Object { $ExistingDismHostIds -notcontains $_.Id }
+                    )
+
+                    if ($NewDismHost.Count -eq 0) {
+                        break
+                    }
+
+                    Start-Sleep -Seconds 1
+                }
+                while ((Get-Date) -lt $Deadline)
+
+                if ($NewDismHost.Count -gt 0) {
+                    Write-Warning 'Timed out waiting for CleanMgr child DismHost process(es). Continuing with remaining cleanup steps.'
+                }
             }
             catch {
                 Write-Error "Invoke-CleanManager: $($_.Exception.Message)"
@@ -168,3 +194,4 @@ function Invoke-CleanManager {
         New-CleanupReport -Name 'CleanManager' -StopWatch $StopWatch -DiskBefore $Before
     }
 }
+
