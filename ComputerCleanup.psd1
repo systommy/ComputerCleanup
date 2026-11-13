@@ -12,10 +12,10 @@
 RootModule = 'ComputerCleanup.psm1'
 
 # Version number of this module.
-ModuleVersion = '3.0.0'
+ModuleVersion = '3.0.1'
 
 # Supported PSEditions
-# Desktop + Core — module supports Windows PowerShell 5.1 and PowerShell 7+ on Windows
+# Desktop + Core - module supports Windows PowerShell 5.1 and PowerShell 7+ on Windows
 CompatiblePSEditions = @('Desktop', 'Core')
 
 # ID used to uniquely identify this module
@@ -25,13 +25,13 @@ GUID = '560a6a80-ba3a-4a98-95b9-e61546aa3307'
 Author = 'Tom de Leeuw'
 
 # Company or vendor of this module
-CompanyName = 'Tech-Tom.com'
+CompanyName = 'Tom de Leeuw'
 
 # Copyright statement for this module
 Copyright = '(c) Tom de Leeuw. All rights reserved.'
 
 # Description of the functionality provided by this module
-Description = 'PowerShell module for freeing up disk space on Windows computers (RDS servers, local machines). Cleans temp files, browser caches, Teams cache, font cache, SoftwareDistribution, and more.'
+Description = 'Preview Windows maintenance module with explicit cleanup selection, guarded file deletion, service recovery and disk-space reporting. Disposable VM acceptance required before release.'
 
 # Minimum version of the PowerShell engine required by this module
 PowerShellVersion = '5.1'
@@ -121,7 +121,9 @@ FileList = @(
     'Private\Stop-ProcessGracefully.ps1',
     'Private\Stop-ServiceSet.ps1',
     'Private\Start-ServiceSet.ps1',
-    'Private\Remove-StaleFiles.ps1'
+    'Private\Remove-StaleFiles.ps1',
+    'Private\Test-SafeCleanupPath.ps1',
+    'Private\Get-SafeCleanupItem.ps1'
 )
 
 # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
@@ -133,19 +135,19 @@ PrivateData = @{
         Tags = @('Cleanup', 'DiskSpace', 'TempFiles', 'Maintenance', 'RDS', 'Windows', 'Cache', 'BrowserCache', 'Administration')
 
         # A URL to the license for this module.
-        LicenseUri = 'https://github.com/tomdeleeuw/ComputerCleanup/blob/main/LICENSE'
+        # License selection is pending; no license grant is asserted.
 
         # A URL to the main website for this project.
-        ProjectUri = 'https://github.com/tomdeleeuw/ComputerCleanup'
+        ProjectUri = 'https://github.com/systommy/ComputerCleanup'
 
         # A URL to an icon representing this module.
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'v3.0.0 - Added dual Desktop/Core support, JSON-driven Browser/Teams targets, shared .NET cleanup engine, graceful process shutdown, and safer service restart behavior.'
+        ReleaseNotes = 'Unreleased safety preparation. See CHANGELOG.md; VM acceptance and licensing remain pending.'
 
         # Prerelease string of this module
-        # Prerelease = ''
+        Prerelease = 'preview1'
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false

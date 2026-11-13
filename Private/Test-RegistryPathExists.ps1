@@ -12,6 +12,7 @@
     [bool]
 #>
 function Test-RegistryPathExists {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
     [CmdletBinding()]
     [OutputType([bool])]
     param(

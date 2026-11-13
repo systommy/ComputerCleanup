@@ -1,192 +1,64 @@
-<#
+function Remove-StaleFiles {
+    <#
     .SYNOPSIS
-    Removes files and directories using .NET I/O APIs.
-
+    Removes eligible files and empty descendant directories from literal targets.
     .DESCRIPTION
-    Enumerates filesystem entries with reparse-point protection, applies optional
-    age filtering, and deletes matched files/directories while suppressing common
-    IO and access errors. Uses a PS 7+ EnumerationOptions path and a PS 5.1
-    DirectoryInfo path for dual compatibility.
-
+    Never recursively deletes directories. New, locked and unmatched files survive
+    regardless of parent age. Rechecks ancestors immediately before deletion.
     .PARAMETER Paths
-    One or more filesystem paths (files, directories, or wildcard paths).
-
+    Absolute local literal targets. Target directories themselves are retained.
     .PARAMETER CutoffDate
-    Optional datetime threshold used with age-based modes.
-
+    Required with age filtering; comparison is strictly older than.
     .PARAMETER AgeMode
-    None, CreationAndLastAccess, or CreationAndLastWrite.
-
+    None, CreationAndLastWrite, or compatibility mode CreationAndLastAccess.
     .PARAMETER FileNamePattern
-    Optional file name match pattern. Defaults to '*'.
-
+    Pattern applied to file names only, never expanded as a filesystem path.
+    .PARAMETER MinimumBytes
+    Exclusive size threshold. Minus one includes empty files.
+    .EXAMPLE
+    Remove-StaleFiles -Paths 'C:\CleanupFixture\cache' -WhatIf
     .OUTPUTS
     None
-#>
-function Remove-StaleFiles {
-    [CmdletBinding()]
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([void])]
     param(
-        [Parameter(Mandatory)]
-        [ValidateNotNull()]
-        [string[]] $Paths,
-
-        [Parameter()]
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string[]] $Paths,
         [Nullable[datetime]] $CutoffDate,
-
-        [Parameter()]
-        [ValidateSet('None', 'CreationAndLastAccess', 'CreationAndLastWrite')]
-        [string] $AgeMode = 'None',
-
-        [Parameter()]
-        [string] $FileNamePattern = '*'
+        [ValidateSet('None','CreationAndLastAccess','CreationAndLastWrite')][string] $AgeMode = 'None',
+        [string] $FileNamePattern = '*',
+        [ValidateRange(-1, [long]::MaxValue)][long] $MinimumBytes = -1
     )
-
-    begin {
-        if ($AgeMode -ne 'None' -and $null -eq $CutoffDate) {
-            throw 'CutoffDate is required when AgeMode is not None.'
-        }
-
-        $CutoffUtc = if ($null -ne $CutoffDate) {
-            ([datetime] $CutoffDate).ToUniversalTime()
-        }
-        else {
-            [datetime]::MinValue
-        }
-
-        function Test-AgeMatch {
-            param(
-                [Parameter(Mandatory)]
-                [System.IO.FileSystemInfo] $Item,
-
-                [Parameter(Mandatory)]
-                [datetime] $ThresholdUtc,
-
-                [Parameter(Mandatory)]
-                [string] $Mode
-            )
-
-            if ($Mode -eq 'None') {
-                return $true
+    if ($AgeMode -ne 'None' -and $null -eq $CutoffDate) { throw 'CutoffDate is required for age filtering.' }
+    $CutoffUtc = if ($null -ne $CutoffDate) { ([datetime]$CutoffDate).ToUniversalTime() } else { [datetime]::MaxValue }
+    foreach ($Target in $Paths) {
+        $Entries = @(Get-SafeCleanupItem -LiteralPath $Target)
+        foreach ($File in @($Entries | Where-Object { $_ -is [IO.FileInfo] })) {
+            if (-not (Test-SafeCleanupPath -LiteralPath $File.FullName)) { continue }
+            $File.Refresh()
+            if ($File.Name -notlike $FileNamePattern -or $File.Length -le $MinimumBytes) { continue }
+            if ($AgeMode -ne 'None') {
+                $OtherDate = if ($AgeMode -eq 'CreationAndLastAccess') { $File.LastAccessTimeUtc } else { $File.LastWriteTimeUtc }
+                if ($File.CreationTimeUtc -ge $CutoffUtc -or $OtherDate -ge $CutoffUtc) { continue }
             }
-
-            if ($Mode -eq 'CreationAndLastAccess') {
-                return ($Item.CreationTimeUtc -lt $ThresholdUtc -and $Item.LastAccessTimeUtc -lt $ThresholdUtc)
+            if ($PSCmdlet.ShouldProcess($File.FullName, 'Permanently delete file')) {
+                try { [IO.File]::Delete($File.FullName) }
+                catch { Write-Error "Could not delete '$($File.FullName)': $($_.Exception.Message)" }
             }
-
-            return ($Item.CreationTimeUtc -lt $ThresholdUtc -and $Item.LastWriteTimeUtc -lt $ThresholdUtc)
         }
-    }
-
-    process {
-        foreach ($InputPath in $Paths) {
-            if ([string]::IsNullOrWhiteSpace($InputPath)) {
-                continue
-            }
-
-            $Targets = @(Get-Item -Path $InputPath -Force -ErrorAction SilentlyContinue)
-            if ($Targets.Count -eq 0) {
-                continue
-            }
-
-            foreach ($Target in $Targets) {
-                if ($Target -is [System.IO.FileInfo]) {
-                    if ($FileNamePattern -ne '*' -and $Target.Name -notlike $FileNamePattern) {
-                        continue
-                    }
-
-                    if (-not (Test-AgeMatch -Item $Target -ThresholdUtc $CutoffUtc -Mode $AgeMode)) {
-                        continue
-                    }
-
-                    try {
-                        [System.IO.File]::Delete($Target.FullName)
-                        Write-Verbose "Deleted file: $($Target.FullName)"
-                    }
-                    catch {
-                        Write-Verbose "Failed to delete file '$($Target.FullName)': $($_.Exception.Message)"
-                    }
-
-                    continue
-                }
-
-                if (($Target.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                    Write-Verbose "Skipping reparse point root: $($Target.FullName)"
-                    continue
-                }
-
-                $Entries = New-Object System.Collections.Generic.List[System.IO.FileSystemInfo]
-
-                try {
-                    $DirectoryInfo = [System.IO.DirectoryInfo]::new($Target.FullName)
-
-                    if ($PSVersionTable.PSVersion.Major -ge 7) {
-                        $EnumerationOptions = [System.IO.EnumerationOptions]::new()
-                        $EnumerationOptions.RecurseSubdirectories = $true
-                        $EnumerationOptions.AttributesToSkip = [System.IO.FileAttributes]::ReparsePoint
-                        $EnumerationOptions.IgnoreInaccessible = $true
-
-                        foreach ($Entry in $DirectoryInfo.EnumerateFileSystemInfos('*', $EnumerationOptions)) {
-                            $Entries.Add($Entry)
-                        }
-                    }
-                    else {
-                        foreach ($Entry in $DirectoryInfo.EnumerateFileSystemInfos('*', [System.IO.SearchOption]::AllDirectories)) {
-                            if (($Entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                                continue
-                            }
-
-                            $Entries.Add($Entry)
-                        }
-                    }
-                }
-                catch {
-                    Write-Verbose "Enumeration failed for '$($Target.FullName)': $($_.Exception.Message)"
-                    continue
-                }
-
-                $FilesToDelete = @(
-                    $Entries | Where-Object {
-                        $_ -is [System.IO.FileInfo] -and
-                        ($FileNamePattern -eq '*' -or $_.Name -like $FileNamePattern) -and
-                        (Test-AgeMatch -Item $_ -ThresholdUtc $CutoffUtc -Mode $AgeMode)
-                    }
-                )
-
-                foreach ($File in $FilesToDelete) {
-                    try {
-                        [System.IO.File]::Delete($File.FullName)
-                        Write-Verbose "Deleted file: $($File.FullName)"
-                    }
-                    catch {
-                        Write-Verbose "Failed to delete file '$($File.FullName)': $($_.Exception.Message)"
-                    }
-                }
-
-                if ($FileNamePattern -eq '*') {
-                    $DirectoriesToDelete = @(
-                        $Entries | Where-Object {
-                            $_ -is [System.IO.DirectoryInfo] -and
-                            (Test-AgeMatch -Item $_ -ThresholdUtc $CutoffUtc -Mode $AgeMode)
-                        } | Sort-Object { $_.FullName.Length } -Descending
-                    )
-
-                    foreach ($Directory in $DirectoriesToDelete) {
-                        try {
-                            [System.IO.Directory]::Delete($Directory.FullName, $true)
-                            Write-Verbose "Deleted directory: $($Directory.FullName)"
-                        }
-                        catch {
-                            Write-Verbose "Failed to delete directory '$($Directory.FullName)': $($_.Exception.Message)"
-                        }
-                    }
+        if ($FileNamePattern -eq '*' -and $MinimumBytes -eq -1) {
+            foreach ($Directory in @($Entries | Where-Object { $_ -is [IO.DirectoryInfo] } | Sort-Object { $_.FullName.Length } -Descending)) {
+                if ($Directory.FullName.TrimEnd('\') -eq $Target.TrimEnd('\')) { continue }
+                if (-not (Test-SafeCleanupPath -LiteralPath $Directory.FullName)) { continue }
+                $Directory.Refresh()
+                if ($AgeMode -ne 'None' -and ($Directory.CreationTimeUtc -ge $CutoffUtc -or $Directory.LastWriteTimeUtc -ge $CutoffUtc)) { continue }
+                if (@(Get-ChildItem -LiteralPath $Directory.FullName -Force -ErrorAction Stop).Count) { continue }
+                if ($PSCmdlet.ShouldProcess($Directory.FullName, 'Remove empty directory')) {
+                    try { [IO.Directory]::Delete($Directory.FullName, $false) }
+                    catch { Write-Error "Could not remove empty directory '$($Directory.FullName)': $($_.Exception.Message)" }
                 }
             }
         }
     }
 }
-
-
-
-
-

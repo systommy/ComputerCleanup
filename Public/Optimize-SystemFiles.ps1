@@ -19,7 +19,7 @@
     Enable clearing of the Windows Recycle Bin.
 
     .PARAMETER Force
-    Suppresses all confirmation prompts.
+    Suppresses implicit confirmation. Explicit -Confirm and -WhatIf take precedence.
 
     .EXAMPLE
     Optimize-SystemFiles -Days 30 -TempFiles
@@ -41,7 +41,8 @@
     Website:  https://systom.dev
 #>
 function Optimize-SystemFiles {
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([PSCustomObject])]
     param(
         [Parameter(Mandatory, Position = 0)]
@@ -84,7 +85,7 @@ function Optimize-SystemFiles {
                 if (Test-Path -Path $Folder) {
                     if ($PSCmdlet.ShouldProcess($Folder, "Remove files older than $Days days")) {
                         try {
-                            Remove-StaleFiles -Paths @($Folder) -CutoffDate $CutoffDate -AgeMode 'CreationAndLastWrite'
+                            Remove-StaleFiles -Paths @($Folder) -CutoffDate $CutoffDate -AgeMode 'CreationAndLastWrite' -Confirm:$false -ErrorAction Stop
                         }
                         catch {
                             Write-Error $_
@@ -99,7 +100,7 @@ function Optimize-SystemFiles {
             if ($PSCmdlet.ShouldProcess('Recycle Bin', 'Clear all items')) {
                 try {
                     Write-Verbose 'Clearing Recycle Bin...'
-                    Clear-RecycleBin -Force
+                    Clear-RecycleBin -DriveLetter $env:SystemDrive.Substring(0, 1) -Force -ErrorAction Stop
                 }
                 catch {
                     Write-Error $_

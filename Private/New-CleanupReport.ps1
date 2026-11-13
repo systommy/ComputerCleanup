@@ -5,7 +5,7 @@
     .DESCRIPTION
     Stops the provided stopwatch, captures current disk space, and returns a
     PSCustomObject with the cleanup section name, duration, and space metrics.
-    All data is passed via parameters — no script-scope variable access.
+    All data is passed via parameters - no script-scope variable access.
 
     .PARAMETER Name
     The name of the cleanup section (e.g. 'BrowserCache', 'SystemFiles').
@@ -28,6 +28,7 @@
     Website:  https://systom.dev
 #>
 function New-CleanupReport {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an in-memory report; no external state is changed.')]
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
@@ -47,10 +48,11 @@ function New-CleanupReport {
 
         [PSCustomObject]@{
             Name           = $Name
+            IsPreview      = [bool]$WhatIfPreference
             Duration       = '{0:00.00} sec' -f $StopWatch.Elapsed.TotalSeconds
             SpaceBeforeGB  = $DiskBefore.FreeSpaceGB
             SpaceAfterGB   = $After.FreeSpaceGB
-            SpaceCleanedGB = [math]::Round($After.FreeSpaceGB - $DiskBefore.FreeSpaceGB, 2)
+            SpaceCleanedGB = if ($WhatIfPreference) { 0 } else { [math]::Round($After.FreeSpaceGB - $DiskBefore.FreeSpaceGB, 2) }
         }
     }
 }

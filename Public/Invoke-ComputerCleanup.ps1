@@ -9,16 +9,16 @@
     returns a result object that is collected into a results array.
 
     The -Days parameter controls file age threshold but does NOT apply to
-    -BrowserCache, -TeamsCache, -SoftwareDistribution, or -FontCache (those always clean everything).
+    -BrowserCache, -TeamsCache, -SoftwareDistribution, -FontCache, -RecycleBin or -CleanManager.
 
     Supports -WhatIf, -Confirm, and -Force.
 
     .PARAMETER Days
     Only remove files and folders older than this many days. Defaults to 30.
-    Does NOT apply to BrowserCache, TeamsCache, SoftwareDistribution, or FontCache.
+    Does NOT apply to BrowserCache, TeamsCache, SoftwareDistribution, FontCache, RecycleBin or CleanManager.
 
     .PARAMETER CleanManager
-    Runs the Windows Disk Cleanup tool with predefined options.
+    Runs installed Windows Disk Cleanup with Temporary Files and Thumbnail Cache selected.
 
     .PARAMETER SystemTemp
     Removes common system-wide temporary files and folders older than Days.
@@ -36,13 +36,13 @@
     Clears Microsoft Teams cache files for all users. Stops running Teams processes.
 
     .PARAMETER Force
-    Suppresses all confirmation prompts.
+    Suppresses implicit confirmation; explicit -Confirm and -WhatIf take precedence.
 
     .PARAMETER UserTemp
     Removes common temporary files from user profiles older than Days.
 
     .PARAMETER UserDownloads
-    Removes large archive/installer files from users' Downloads folders.
+    Removes selected archives larger than 500MB from Downloads, independently of UserTemp.
 
     .PARAMETER ArchiveTypes
     File extensions to consider as archive files when using -UserDownloads.
@@ -52,7 +52,7 @@
     Clears the Windows Recycle Bin.
 
     .PARAMETER MailReport
-    Send an HTML email report after cleanup completes.
+    Send a separately confirmed HTML report and private transcript through the legacy SMTP path. Requires all SMTP/address parameters.
 
     .PARAMETER SmtpServer
     SMTP server address for email reports.
@@ -125,6 +125,7 @@ function Invoke-ComputerCleanup {
         [switch] $UserDownloads,
 
         [Parameter()]
+        [ValidatePattern('^[A-Za-z0-9]+$')]
         [string[]] $ArchiveTypes = @('zip', 'rar', '7z', 'iso'),
 
         [Parameter()]
@@ -146,202 +147,52 @@ function Invoke-ComputerCleanup {
         [string] $ToAddress
     )
 
-    begin {
-        if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
-            $ConfirmPreference = 'None'
-        }
-
-        $InformationPreference = 'Continue'
-
-        # Start logging
-        $LogFile = Start-Logging -LogName 'ComputerCleanup'
-
-        Assert-RunAsAdministrator
-
-        $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $Before    = Get-DiskSpace
-        $Results   = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) { $ConfirmPreference = 'None' }
+    Assert-RunAsAdministrator
+    $Selected = @('CleanManager','UserTemp','UserDownloads','SystemTemp','SoftwareDistribution','FontCache','TeamsCache','BrowserCache','RecycleBin' | Where-Object { $PSBoundParameters.ContainsKey($_) -and $PSBoundParameters[$_] })
+    if (-not $Selected.Count) { throw 'Select at least one cleanup operation.' }
+    if ($MailReport -and (-not $SmtpServer -or $SmtpPort -lt 1 -or $SmtpPort -gt 65535 -or -not $FromAddress -or -not $ToAddress)) {
+        throw 'MailReport requires SmtpServer, SmtpPort (1-65535), FromAddress and ToAddress.'
     }
-
-    process {
-        # Display parameter summary
-        $ParamReport      = [ordered]@{}
-        $RiskyParamReport = [ordered]@{}
-
-        switch ($PSBoundParameters.Keys) {
-            'Days'                 { $ParamReport.Days = "Files older than $Days days will be removed. Does NOT apply to BrowserCache, TeamsCache, SoftwareDistribution, FontCache." }
-            'CleanManager'         { $ParamReport.CleanManager = 'Runs the Windows Disk Cleanup tool with predefined options.' }
-            'SystemTemp'           { $ParamReport.SystemTemp = "Removes common system-wide temporary files older than $Days days." }
-            'UserTemp'             { $ParamReport.UserTemp = "Removes common temporary files from user profiles older than $Days days." }
-            'UserDownloads'        { $ParamReport.UserDownloads = "Removes large archive/installer files older than $Days days from Downloads folders."
-                                     $RiskyParamReport.UserDownloads = "This will remove users' personal files! Please make sure they are informed." }
-            'SoftwareDistribution' { $ParamReport.SoftwareDistribution = 'Cleans the SoftwareDistribution\Download folder.' }
-            'FontCache'            { $ParamReport.FontCache = 'Removes font cache files and restarts the Font Cache service.' }
-            'TeamsCache'           { $ParamReport.TeamsCache = 'Clears Microsoft Teams cache files for all users.'
-                                     $RiskyParamReport.TeamsCache = 'This will stop ALL running Teams processes. Running outside of working hours is advised.' }
-            'BrowserCache'         { $ParamReport.BrowserCache = 'Clears cache files for all browsers.'
-                                     $RiskyParamReport.BrowserCache = 'This will stop ALL running browser processes. Running outside of working hours is advised.' }
-            'RecycleBin'           { $ParamReport.RecycleBin = 'Clears the Windows Recycle Bin.' }
+    # One approval covers the selected batch, including logging. All actual child
+    # actions still have their own ShouldProcess guards for direct invocation.
+    $Action = 'Permanently clean selected data, affect selected processes/services, and create a local transcript'
+    if (-not $PSCmdlet.ShouldProcess(($Selected -join ', '), $Action)) { return }
+    $LogFile = $null
+    $Results = [Collections.Generic.List[PSCustomObject]]::new()
+    $Before = Get-DiskSpace
+    $StopWatch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $LogFile = Start-Logging -LogName 'ComputerCleanup' -Confirm:$false
+        $Child = @{ Confirm = $false; ErrorAction = 'Stop' }
+        if ($CleanManager) { $Results.Add((Invoke-CleanManager @Child)) }
+        if ($UserTemp -or $UserDownloads) {
+            $Results.Add((Optimize-UserProfiles -Days $Days -TempFiles:$UserTemp -Downloads:$UserDownloads -ArchiveFiles:$UserDownloads -ArchiveTypes $ArchiveTypes @Child))
         }
-
-        if ($ParamReport.Count -gt 0) {
-            Write-Verbose ''.PadLeft(76, '-')
-            Write-Verbose '=== SCRIPT OPTIONS SUMMARY:'
-            $ParamReport.Keys | ForEach-Object {
-                Write-Verbose "  $_ : $($ParamReport[$_])"
-            }
-
-            if ($RiskyParamReport.Count -gt 0 -and -not $Force) {
-                Write-Warning 'Some commands are dangerous to execute on a live environment. Please review:'
-                $RiskyParamReport.Keys | ForEach-Object {
-                    Write-Warning "  $_ : $($RiskyParamReport[$_])"
-                }
-            }
-            Write-Verbose ''.PadLeft(76, '-')
+        if ($SystemTemp -or $RecycleBin) {
+            $Results.Add((Optimize-SystemFiles -Days $Days -TempFiles:$SystemTemp -RecycleBin:$RecycleBin @Child))
         }
-
-        # Execute cleanup functions based on switches
-        if ($CleanManager) {
-            try {
-                Write-Information '=== STARTED : Windows Disk Cleanup (this may take a while)'
-                Write-Verbose '=== STARTED : Windows Disk Cleanup (this may take a while)'
-                $Result = Invoke-CleanManager -Force:$Force
-                if ($Result) { $Results.Add($Result) }
-                Write-Information '=== FINISHED: Windows Disk Cleanup'
-                Write-Verbose '=== FINISHED: Windows Disk Cleanup'
-            }
-            catch {
-                Write-Error $_
-            }
-        }
-
-        if ($UserTemp) {
-            $UserParams = @{
-                Days      = $Days
-                TempFiles = $true
-                Force     = [bool]$Force
-            }
-            if ($UserDownloads) {
-                $UserParams.Downloads    = $true
-                $UserParams.ArchiveFiles = $true
-                $UserParams.ArchiveTypes = $ArchiveTypes
-            }
-
-            Write-Information '=== STARTED : Cleaning User Profiles'
-            Write-Verbose '=== STARTED : Cleaning User Profiles'
-            $Result = Optimize-UserProfiles @UserParams
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning User Profiles'
-            Write-Verbose '=== FINISHED: Cleaning User Profiles'
-        }
-
-        if ($SystemTemp) {
-            Write-Information '=== STARTED : Cleaning System files'
-            Write-Verbose '=== STARTED : Cleaning System files'
-            $Result = Optimize-SystemFiles -Days $Days -TempFiles -Force:$Force
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning System files'
-            Write-Verbose '=== FINISHED: Cleaning System files'
-        }
-
-        if ($SoftwareDistribution) {
-            Write-Information '=== STARTED : Cleaning SoftwareDistribution Download folder'
-            Write-Verbose '=== STARTED : Cleaning SoftwareDistribution Download folder'
-            $Result = Clear-SoftwareDistribution -Force:$Force
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning SoftwareDistribution Download folder'
-            Write-Verbose '=== FINISHED: Cleaning SoftwareDistribution Download folder'
-        }
-
-        if ($FontCache) {
-            Write-Information '=== STARTED : Cleaning Font Cache'
-            Write-Verbose '=== STARTED : Cleaning Font Cache'
-            $Result = Clear-FontCache -Force:$Force
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning Font Cache'
-            Write-Verbose '=== FINISHED: Cleaning Font Cache'
-        }
-
-        if ($TeamsCache) {
-            Write-Information '=== STARTED : Cleaning Teams cache'
-            Write-Verbose '=== STARTED : Cleaning Teams cache'
-            $Result = Clear-TeamsCache -Force:$Force
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning Teams cache'
-            Write-Verbose '=== FINISHED: Cleaning Teams cache'
-        }
-
-        if ($BrowserCache) {
-            Write-Information '=== STARTED : Cleaning Browser Cache'
-            Write-Verbose '=== STARTED : Cleaning Browser Cache'
-            $Result = Clear-BrowserCache -Force:$Force
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning Browser Cache'
-            Write-Verbose '=== FINISHED: Cleaning Browser Cache'
-        }
-
-        if ($RecycleBin) {
-            Write-Information '=== STARTED : Cleaning Recycle Bin'
-            Write-Verbose '=== STARTED : Cleaning Recycle Bin'
-            $Result = Optimize-SystemFiles -Days $Days -RecycleBin -Force:$Force
-            if ($Result) { $Results.Add($Result) }
-            Write-Information '=== FINISHED: Cleaning Recycle Bin'
-            Write-Verbose '=== FINISHED: Cleaning Recycle Bin'
-        }
-
-        # Reporting / Finalization
-        $After = Get-DiskSpace
+        if ($SoftwareDistribution) { $Results.Add((Clear-SoftwareDistribution @Child)) }
+        if ($FontCache) { $Results.Add((Clear-FontCache @Child)) }
+        if ($TeamsCache) { $Results.Add((Clear-TeamsCache @Child)) }
+        if ($BrowserCache) { $Results.Add((Clear-BrowserCache @Child)) }
+    }
+    finally {
         $StopWatch.Stop()
-
-        $TotalSeconds = '{0:00.00} sec' -f $StopWatch.Elapsed.TotalSeconds
-        $TotalMinutes = '{0:00} min' -f $StopWatch.Elapsed.TotalMinutes
-        $SpaceBefore  = "$($Before.FreeSpaceGB) GB"
-        $SpaceAfter   = "$($After.FreeSpaceGB) GB"
-        $TotalCleaned = '{0:00.00} GB' -f ($After.FreeSpaceGB - $Before.FreeSpaceGB)
-
-        Write-Information ''.PadLeft(76, '-')
-        Write-Information '=== SCRIPT FINISHED'
-        Write-Information "Current Time       : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        Write-Information "Elapsed Time       : $TotalSeconds / $TotalMinutes"
-        Write-Information "Free space BEFORE  : $SpaceBefore"
-        Write-Information "Free space AFTER   : $SpaceAfter"
-        Write-Information "TOTAL space cleaned: $TotalCleaned"
-        Write-Information ''.PadLeft(76, '-')
-        Write-Information '=== PER-SECTION BREAKDOWN'
-        $Results | Format-Table -AutoSize | Out-String | Write-Information
-        Write-Information ''.PadLeft(76, '-')
+        if ($LogFile) { Stop-Transcript -ErrorAction Stop | Out-Null }
     }
-
-    end {
-        Stop-Transcript
-
-        if ($MailReport) {
-            $Summary = [PSCustomObject]@{
-                TotalSeconds = $TotalSeconds
-                TotalMinutes = $TotalMinutes
-                SpaceBefore  = $SpaceBefore
-                SpaceAfter   = $SpaceAfter
-                TotalCleaned = $TotalCleaned
-            }
-
-            $MailBody = New-HtmlCleanupReport -CleanupResults $Results.ToArray() -Summary $Summary
-
-            $MailParams = @{
-                SmtpServer  = $SmtpServer
-                Port        = $SmtpPort
-                From        = $FromAddress
-                To          = $ToAddress
-                Subject     = "$([System.Net.Dns]::GetHostEntry($env:ComputerName).HostName) - Disk Cleanup report"
-                Body        = $MailBody
-                BodyAsHtml  = $true
-                Attachments = $LogFile
-            }
-
-            Write-Verbose "Sending e-mail report to $($MailParams.To)"
-            Send-MailMessage @MailParams -WarningAction SilentlyContinue
+    if ($MailReport -and $PSCmdlet.ShouldProcess($ToAddress, 'Send cleanup report and transcript over configured SMTP')) {
+        $After = Get-DiskSpace
+        $Summary = [PSCustomObject]@{
+            TotalSeconds = '{0:F2} sec' -f $StopWatch.Elapsed.TotalSeconds
+            TotalMinutes = '{0:F2} min' -f $StopWatch.Elapsed.TotalMinutes
+            SpaceBefore = "$($Before.FreeSpaceGB) GB"
+            SpaceAfter = "$($After.FreeSpaceGB) GB"
+            TotalCleaned = '{0:F2} GB' -f ($After.FreeSpaceGB - $Before.FreeSpaceGB)
         }
-
-        $Results.ToArray()
+        $MailBody = New-HtmlCleanupReport -CleanupResults $Results.ToArray() -Summary $Summary
+        # Compatibility only: prefer consuming returned objects with your approved mail client.
+        Send-MailMessage -SmtpServer $SmtpServer -Port $SmtpPort -From $FromAddress -To $ToAddress -Subject 'ComputerCleanup report' -Body $MailBody -BodyAsHtml -Attachments $LogFile -ErrorAction Stop
     }
+    $Results.ToArray()
 }
-

@@ -1,48 +1,35 @@
-<#
-    .SYNOPSIS
-    Stops a service set and returns services that were originally running.
-
-    .DESCRIPTION
-    Captures running state before stop and only attempts to stop running
-    services. Returned names are intended for restart later.
-
-    .PARAMETER ServiceNames
-    Service names to evaluate and stop.
-
-    .OUTPUTS
-    [string[]]
-#>
 function Stop-ServiceSet {
-    [CmdletBinding()]
-    [OutputType([string[]])]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string[]] $ServiceNames
-    )
-
-    process {
-        $RunningServiceNames = New-Object System.Collections.Generic.List[string]
-        $UniqueServiceNames = $ServiceNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
-
-        foreach ($ServiceName in $UniqueServiceNames) {
-            $Service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-            if ($null -eq $Service) {
-                continue
-            }
-
-            if ($Service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
-                $RunningServiceNames.Add($ServiceName)
-                try {
-                    Write-Verbose "Stopping service '$ServiceName'..."
-                    Stop-Service -Name $ServiceName -Force -ErrorAction Stop
-                }
-                catch {
-                    Write-Warning "Failed to stop service '$ServiceName': $($_.Exception.Message)"
-                }
+    <#
+    .SYNOPSIS
+    Stops a service set, rolling back partial stops on failure.
+    .DESCRIPTION
+    Refuses transitional states and dependent-service force stops. Caller restores
+    returned originally running services in finally.
+    .PARAMETER ServiceNames
+    Explicit service names.
+    .EXAMPLE
+    Stop-ServiceSet -ServiceNames 'ExampleService' -WhatIf
+    .OUTPUTS
+    System.String
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string[]] $ServiceNames)
+    $Restore = [Collections.Generic.List[string]]::new()
+    try {
+        foreach ($Name in ($ServiceNames | Select-Object -Unique)) {
+            $Service = Get-Service -Name $Name -ErrorAction Stop
+            if ($Service.Status -notin @('Running', 'Stopped')) { throw "Service '$Name' is in a transitional state." }
+            if ($Service.Status -eq 'Running' -and $PSCmdlet.ShouldProcess($Name, 'Stop service; restore after cleanup')) {
+                $Restore.Add($Name)
+                Stop-Service -Name $Name -Confirm:$false -ErrorAction Stop
+                $Service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped, [timespan]::FromSeconds(30))
             }
         }
-
-        $RunningServiceNames.ToArray()
     }
+    catch {
+        if ($Restore.Count) { Start-ServiceSet -ServiceNames $Restore.ToArray() -Confirm:$false }
+        throw
+    }
+    $Restore.ToArray()
 }

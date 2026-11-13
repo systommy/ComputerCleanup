@@ -16,7 +16,7 @@
     None
 #>
 function Stop-ProcessGracefully {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([void])]
     param(
         [Parameter(Mandatory)]
@@ -36,6 +36,8 @@ function Stop-ProcessGracefully {
             if ($Processes.Count -eq 0) {
                 continue
             }
+
+            if (-not $PSCmdlet.ShouldProcess($ProcessName, 'Close windows then force termination if necessary')) { continue }
 
             Write-Verbose "Trying graceful shutdown for process '$ProcessName'..."
 
@@ -57,15 +59,15 @@ function Stop-ProcessGracefully {
                 Write-Verbose "Wait-Process timeout or error for '$ProcessName': $($_.Exception.Message)"
             }
 
-            $RemainingProcesses = @(Get-Process -ProcessName $ProcessName -ErrorAction SilentlyContinue)
+            $RemainingProcesses = @(Get-Process -Id $Processes.Id -ErrorAction SilentlyContinue)
             if ($RemainingProcesses.Count -gt 0) {
                 Write-Verbose "Forcing shutdown for process '$ProcessName'..."
                 foreach ($RemainingProcess in $RemainingProcesses) {
                     try {
-                        Stop-Process -Id $RemainingProcess.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
+                        Stop-Process -Id $RemainingProcess.Id -Force -Confirm:$false -ErrorAction Stop
                     }
                     catch {
-                        Write-Verbose "Stop-Process failed for '$ProcessName' (PID $($RemainingProcess.Id)): $($_.Exception.Message)"
+                        throw "Stop-Process failed for '$ProcessName' (PID $($RemainingProcess.Id)): $($_.Exception.Message)"
                     }
                 }
             }

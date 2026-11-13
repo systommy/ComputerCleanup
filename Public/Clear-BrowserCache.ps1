@@ -12,7 +12,7 @@
     Defaults to 'All'.
 
     .PARAMETER Force
-    Suppresses all confirmation prompts.
+    Suppresses implicit confirmation; explicit -Confirm and -WhatIf still take precedence.
 
     .EXAMPLE
     Clear-BrowserCache
@@ -101,16 +101,9 @@ function Clear-BrowserCache {
     process {
         Write-Verbose 'Starting browser cache cleanup process...'
 
-        $ContinueProcessStop = $false
-        try {
-            $ContinueProcessStop = $PSCmdlet.ShouldContinue('Kill all browser processes? This will close open browser windows.', 'Clear-BrowserCache')
-        }
-        catch {
-            Write-Verbose "Process confirmation prompt unavailable: $($_.Exception.Message)"
-        }
-
-        if ($ContinueProcessStop) {
-            Stop-ProcessGracefully -ProcessNames $BrowserProcesses
+        if (-not $PSCmdlet.ShouldProcess('Browser caches across selected local profiles', 'Close matching processes and permanently remove selected cache data')) { return }
+        if (@($BrowserProcesses).Count -gt 0) {
+            Stop-ProcessGracefully -ProcessNames $BrowserProcesses -Confirm:$false
         }
 
         foreach ($UserName in $Users) {
@@ -121,9 +114,7 @@ function Clear-BrowserCache {
                 $FoldersToClean = Get-ExpandedUserRelativePaths -UserProfilePath $UserProfilePath -RelativePaths @($Definition.RelativePaths)
 
                 foreach ($FolderToClean in $FoldersToClean) {
-                    if ($PSCmdlet.ShouldProcess($FolderToClean, 'Remove cached files')) {
-                        Remove-StaleFiles -Paths @($FolderToClean) -AgeMode 'None'
-                    }
+                    Remove-StaleFiles -Paths @($FolderToClean) -AgeMode 'None' -Confirm:$false -ErrorAction Stop
                 }
             }
 

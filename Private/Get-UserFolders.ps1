@@ -25,6 +25,7 @@
     Website:  https://systom.dev
 #>
 function Get-UserFolders {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
     [CmdletBinding()]
     [OutputType([string[]])]
     param(
@@ -33,15 +34,15 @@ function Get-UserFolders {
     )
 
     process {
-        if (-not (Test-Path -Path $Path -PathType Container)) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
             Write-Warning "User profiles path not found: $Path"
             return
         }
 
         $ExcludePattern = '^(administrator|admin|public|default)$'
 
-        Get-ChildItem -Directory -Path $Path |
-            Where-Object { $_.Name -notmatch $ExcludePattern } |
+        Get-ChildItem -Directory -LiteralPath $Path -ErrorAction Stop |
+            Where-Object { $_.Name -notmatch $ExcludePattern -and (Test-SafeCleanupPath -LiteralPath $_.FullName) } |
             Select-Object -ExpandProperty Name
     }
 }

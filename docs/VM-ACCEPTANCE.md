@@ -1,0 +1,15 @@
+# Disposable Windows VM acceptance — pending
+
+Do not run this checklist on a personal workstation, a production/RDS server or a client tenant. Automated tests are separate and safe to run locally. Record the OS build, engine version, module commit/hash, snapshot ID and results privately. Use invented profile names and test data.
+
+1. Create disposable Windows 11 and Windows Server test VMs with snapshots, Windows PowerShell 5.1 and a supported PowerShell 7. Use local synthetic profiles; record excluded/default profiles. Run automated checks first.
+2. Record system-drive free bytes and a manifest/hash list of fixture files. Seed recent, old, boundary-age, locked, read-only, hidden and long-path files; a stale directory containing a recent file; synthetic Downloads above/below size limits; junctions to an outside sentinel directory. Confirm expected timestamp behavior on NTFS.
+3. Preview each command with WhatIf and WhatIf+Force. Snapshot process/service state, registry presets and transcript directory before/after. Assert no mutation or mail. Test No, No to All, explicit Confirm with Force, and approved execution.
+4. Run only user/system temp cleanup first. Verify file-by-file selection, literal brackets, retained target directories, skipped junctions and visible errors. Test failure and cancellation partway through. Compare before/after disk readings after activity settles; do not equate the delta to exact deleted bytes.
+5. Install disposable browser/Teams profiles with synthetic content. Verify actual detection and cache locations, signed-out process shutdown and subsequent application restart. Verify cookies/local storage/databases and outside sentinels remain intact. Document missed per-user/MSIX installations.
+6. Exercise FontCache and Windows Update/BITS combinations: originally running/stopped, stop failure, pending state, dependent services, locked files and restart failure. Confirm originally stopped services remain stopped and every partial failure attempts restoration. Verify Download.old survives untouched. Do not run during active update servicing; confirm updates still work afterward.
+7. Test Disk Cleanup availability, selected versus missing handlers, existing presets, process failure and nonzero exit. Confirm original StateFlags are unchanged and temporary flags removed. Observe child servicing completion. Recovery-removing sections need an additional VM snapshot and explicit choice.
+8. Test current-user/system-drive Recycle Bin semantics with synthetic deleted files, and verify other drives/users are not represented as cleaned. Test transcript start/stop failure and batch failure. Keep logs private. Test legacy email only with a disposable controlled sink, if that compatibility path will be supported.
+9. Restore snapshots and repeat on both engines/OS targets. Record deviations and narrow documented support before release. If any safety invariant fails, block release and add a regression test.
+
+Acceptance evidence has **not** been collected for real service/process/registry/Recycle Bin operations in this batch. Publication remains blocked on this checklist and licensing approval.

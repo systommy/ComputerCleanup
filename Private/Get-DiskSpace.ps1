@@ -7,11 +7,11 @@
     Used internally for before/after disk space comparison in cleanup functions.
 
     .PARAMETER DriveLetter
-    The drive letter to check. Defaults to 'C'.
+    The drive letter to check. Defaults to the system drive.
 
     .EXAMPLE
     Get-DiskSpace
-    Returns disk space information for the C: drive.
+    Returns disk space information for the system drive.
 
     .EXAMPLE
     Get-DiskSpace -DriveLetter 'D'
@@ -30,7 +30,7 @@ function Get-DiskSpace {
     param(
         [Parameter()]
         [ValidatePattern('^[A-Za-z]$')]
-        [string] $DriveLetter = 'C'
+        [string] $DriveLetter = $env:SystemDrive.Substring(0, 1)
     )
 
     process {

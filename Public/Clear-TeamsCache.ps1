@@ -3,12 +3,12 @@
     Clears Microsoft Teams cache files for all users.
 
     .DESCRIPTION
-    Kills running Teams processes and removes Teams cache directories
-    (blob_storage, databases, cache, gpucache, Indexeddb, Local Storage, tmp)
+    Closes detected Teams processes and removes selected cache directories
+    from CleanupTargets.json (excluding application databases and local storage)
     across all user profiles. Supports -WhatIf, -Confirm, and -Force.
 
     .PARAMETER Force
-    Suppresses all confirmation prompts.
+    Suppresses implicit confirmation; explicit -Confirm and -WhatIf still take precedence.
 
     .EXAMPLE
     Clear-TeamsCache
@@ -85,16 +85,9 @@ function Clear-TeamsCache {
     process {
         Write-Verbose 'Starting Teams Cache cleanup process...'
 
-        $ContinueProcessStop = $false
-        try {
-            $ContinueProcessStop = $PSCmdlet.ShouldContinue('Kill all Teams processes? This will close open Teams windows.', 'Clear-TeamsCache')
-        }
-        catch {
-            Write-Verbose "Process confirmation prompt unavailable: $($_.Exception.Message)"
-        }
-
-        if ($ContinueProcessStop) {
-            Stop-ProcessGracefully -ProcessNames $TeamsProcesses
+        if (-not $PSCmdlet.ShouldProcess('Teams caches across selected local profiles', 'Close matching processes and permanently remove selected cache data')) { return }
+        if (@($TeamsProcesses).Count -gt 0) {
+            Stop-ProcessGracefully -ProcessNames $TeamsProcesses -Confirm:$false
         }
 
         foreach ($UserName in $Users) {
@@ -105,9 +98,7 @@ function Clear-TeamsCache {
                 $FoldersToClean = Get-ExpandedUserRelativePaths -UserProfilePath $UserProfilePath -RelativePaths @($Definition.RelativePaths)
 
                 foreach ($FolderToClean in $FoldersToClean) {
-                    if ($PSCmdlet.ShouldProcess($FolderToClean, 'Remove Teams cache files')) {
-                        Remove-StaleFiles -Paths @($FolderToClean) -AgeMode 'None'
-                    }
+                    Remove-StaleFiles -Paths @($FolderToClean) -AgeMode 'None' -Confirm:$false -ErrorAction Stop
                 }
             }
 

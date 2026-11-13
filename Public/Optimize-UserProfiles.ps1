@@ -6,7 +6,7 @@
     Cleans per-user temp directories including Windows Error Reporting, IE Recovery,
     Terminal Server Client Cache, CrashDumps, and Local\Temp across all user profiles.
     Optionally removes large archive and installer files from users' Downloads folders.
-    Files are filtered by both CreationTime and LastAccessTime against the specified
+    Files are filtered by both CreationTime and LastWriteTime against the specified
     age threshold. Supports -WhatIf, -Confirm, and -Force.
 
     .PARAMETER Days
@@ -37,7 +37,7 @@
     Minimum file size for generic file removal. Defaults to 15MB.
 
     .PARAMETER Force
-    Suppresses all confirmation prompts.
+    Suppresses implicit confirmation. Explicit -Confirm and -WhatIf take precedence.
 
     .EXAMPLE
     Optimize-UserProfiles -Days 30 -TempFiles
@@ -59,7 +59,8 @@
     Website:  https://systom.dev
 #>
 function Optimize-UserProfiles {
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([PSCustomObject])]
     param(
         [Parameter(Mandatory, Position = 0)]
@@ -76,19 +77,23 @@ function Optimize-UserProfiles {
         [switch] $ArchiveFiles,
 
         [Parameter()]
+        [ValidatePattern('^[A-Za-z0-9]+$')]
         [string[]] $ArchiveTypes = @('zip', 'rar', '7z', 'iso'),
 
         [Parameter()]
-        [string] $ArchiveSize = '500MB',
+        [ValidateRange(0, [long]::MaxValue)]
+        [long] $ArchiveSize = 500MB,
 
         [Parameter()]
         [switch] $GenericFiles,
 
         [Parameter()]
+        [ValidatePattern('^[A-Za-z0-9]+$')]
         [string[]] $GenericTypes = @('msi', 'exe'),
 
         [Parameter()]
-        [string] $GenericSize = '15MB',
+        [ValidateRange(0, [long]::MaxValue)]
+        [long] $GenericSize = 15MB,
 
         [Parameter()]
         [switch] $Force
@@ -106,12 +111,6 @@ function Optimize-UserProfiles {
         $Users      = Get-UserFolders
         $CutoffDate = (Get-Date).AddDays(-$Days)
 
-        $CommonParams = @{
-            Recurse       = $true
-            Force         = $true
-            ErrorAction   = 'SilentlyContinue'
-            WarningAction = 'SilentlyContinue'
-        }
     }
 
     process {
@@ -130,7 +129,7 @@ function Optimize-UserProfiles {
                     if (Test-Path -Path $FolderToClean) {
                         if ($PSCmdlet.ShouldProcess($FolderToClean, "Remove files older than $Days days")) {
                             try {
-                                Remove-StaleFiles -Paths @($FolderToClean) -CutoffDate $CutoffDate -AgeMode 'CreationAndLastAccess'
+                                Remove-StaleFiles -Paths @($FolderToClean) -CutoffDate $CutoffDate -AgeMode 'CreationAndLastWrite' -Confirm:$false -ErrorAction Stop
                             }
                             catch {
                                 Write-Error $_
@@ -148,13 +147,7 @@ function Optimize-UserProfiles {
                         foreach ($Ext in $ArchiveTypes) {
                             if ($PSCmdlet.ShouldProcess("$DownloadsPath\*.$Ext (> $ArchiveSize, > $Days days)", 'Remove archive files')) {
                                 try {
-                                    Get-ChildItem -Path "$DownloadsPath\*.$Ext" @CommonParams |
-                                        Where-Object {
-                                            $_.CreationTime -lt $CutoffDate -and
-                                            $_.LastAccessTime -lt $CutoffDate -and
-                                            $_.Length -gt $ArchiveSize
-                                        } |
-                                        Remove-Item @CommonParams
+                                    Remove-StaleFiles -Paths @($DownloadsPath) -FileNamePattern "*.$Ext" -MinimumBytes $ArchiveSize -CutoffDate $CutoffDate -AgeMode CreationAndLastWrite -Confirm:$false -ErrorAction Stop
                                 }
                                 catch {
                                     Write-Error $_
@@ -167,13 +160,7 @@ function Optimize-UserProfiles {
                         foreach ($Ext in $GenericTypes) {
                             if ($PSCmdlet.ShouldProcess("$DownloadsPath\*.$Ext (> $GenericSize, > $Days days)", 'Remove installer files')) {
                                 try {
-                                    Get-ChildItem -Path "$DownloadsPath\*.$Ext" @CommonParams |
-                                        Where-Object {
-                                            $_.CreationTime -lt $CutoffDate -and
-                                            $_.LastAccessTime -lt $CutoffDate -and
-                                            $_.Length -gt $GenericSize
-                                        } |
-                                        Remove-Item @CommonParams
+                                    Remove-StaleFiles -Paths @($DownloadsPath) -FileNamePattern "*.$Ext" -MinimumBytes $GenericSize -CutoffDate $CutoffDate -AgeMode CreationAndLastWrite -Confirm:$false -ErrorAction Stop
                                 }
                                 catch {
                                     Write-Error $_

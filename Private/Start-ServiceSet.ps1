@@ -1,39 +1,28 @@
-<#
+function Start-ServiceSet {
+    <#
     .SYNOPSIS
-    Starts a set of services.
-
+    Restores every listed service, surfacing recovery failures.
     .DESCRIPTION
-    Starts each unique non-empty service name provided.
-
+    Attempts every service even when one fails.
     .PARAMETER ServiceNames
-    Service names to start.
-
+    Services recorded as running before cleanup.
+    .EXAMPLE
+    Start-ServiceSet -ServiceNames 'ExampleService' -WhatIf
     .OUTPUTS
     None
-#>
-function Start-ServiceSet {
-    [CmdletBinding()]
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([void])]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateNotNull()]
-        [string[]] $ServiceNames
-    )
-
-    process {
-        if ($ServiceNames.Count -eq 0) {
-            return
-        }
-
-        $UniqueServiceNames = $ServiceNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
-        foreach ($ServiceName in $UniqueServiceNames) {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]] $ServiceNames)
+    $Failures = @()
+    foreach ($Name in ($ServiceNames | Select-Object -Unique)) {
+        if ($PSCmdlet.ShouldProcess($Name, 'Restore previously running service')) {
             try {
-                Write-Verbose "Starting service '$ServiceName'..."
-                Start-Service -Name $ServiceName -ErrorAction Stop
+                Start-Service -Name $Name -ErrorAction Stop
+                (Get-Service -Name $Name -ErrorAction Stop).WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running, [timespan]::FromSeconds(30))
             }
-            catch {
-                Write-Warning "Failed to start service '$ServiceName': $($_.Exception.Message)"
-            }
+            catch { $Failures += $Name; Write-Warning "Service recovery failed for '$Name'. Check it manually." }
         }
     }
+    if ($Failures.Count) { throw "Could not restore services: $($Failures -join ', ')" }
 }

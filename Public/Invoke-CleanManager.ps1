@@ -1,197 +1,67 @@
-<#
+function Invoke-CleanManager {
+    <#
     .SYNOPSIS
-    Runs the Windows Disk Cleanup tool with predefined options.
-
+    Runs installed Windows Disk Cleanup with a temporary, unused preset.
     .DESCRIPTION
-    Configures registry keys for Windows Disk Cleanup (cleanmgr.exe) with
-    predefined cleanup sections, then runs the tool in automated mode.
-    If cleanmgr.exe is not installed (Server 2008 R2), attempts installation.
-    Supports -WhatIf and -Confirm.
-
-    Default enabled sections include: Active Setup Temp Folders, BranchCache,
-    Device Driver Packages, Downloaded Program Files, Offline Pages Files,
-    Old ChkDsk Files, Previous Installations, Service Pack Cleanup, Setup Log Files,
-    Temporary Files, Temporary Setup Files, Thumbnail Cache, Update Cleanup,
-    Upgrade Discarded Files, Windows Defender, Windows ESD installation files,
-    Windows Error Reporting files, and Windows Upgrade Log Files.
-
+    Does not install Windows features. Selects only Temporary Files and Thumbnail
+    Cache by default. Explicit extra sections can delete update rollback material.
+    Removes its own temporary flags in finally and preserves existing presets.
+    .PARAMETER Sections
+    Explicit built-in categories; only installed matching handlers are selected.
     .PARAMETER Force
-    Suppresses all confirmation prompts.
-
-    .EXAMPLE
-    Invoke-CleanManager
-    Runs Windows Disk Cleanup with predefined options.
-
-    .EXAMPLE
-    Invoke-CleanManager -Force
-    Runs without confirmation.
-
+    Suppress implicit confirmation. Explicit -Confirm and -WhatIf take precedence.
     .EXAMPLE
     Invoke-CleanManager -WhatIf
-    Shows what would happen without modifying registry or running cleanmgr.
-
+    .EXAMPLE
+    Invoke-CleanManager -Sections 'Temporary Files','Thumbnail Cache' -Confirm
     .OUTPUTS
-    [PSCustomObject] Cleanup result with Name, Duration, SpaceBeforeGB, SpaceAfterGB, SpaceCleanedGB.
-
-    .NOTES
-    Author:   Tom de Leeuw
-    Website:  https://systom.dev
-#>
-function Invoke-CleanManager {
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
+    PSCustomObject with duration and observed disk-space delta.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([PSCustomObject])]
     param(
-        [Parameter()]
+        [ValidateSet('Temporary Files','Thumbnail Cache','Downloaded Program Files','Windows Error Reporting Archive Files','Windows Error Reporting Queue Files','Update Cleanup','Previous Installations','Device Driver Packages')]
+        [string[]] $Sections = @('Temporary Files','Thumbnail Cache'),
         [switch] $Force
     )
-
-    begin {
-        if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
-            $ConfirmPreference = 'None'
+    if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) { $ConfirmPreference = 'None' }
+    Assert-RunAsAdministrator
+    $StopWatch = [Diagnostics.Stopwatch]::StartNew()
+    $Before = Get-DiskSpace
+    $Executable = Join-Path $env:SystemRoot 'System32\cleanmgr.exe'
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'cleanmgr.exe is unavailable. No installation will be attempted.' }
+    if ($PSCmdlet.ShouldProcess(($Sections -join ', '), 'Configure temporary preset and run Windows Disk Cleanup')) {
+        $Mutex = [Threading.Mutex]::new($false, 'Local\ComputerCleanup-CleanManager')
+        $Acquired = $false
+        $Touched = [Collections.Generic.List[string]]::new()
+        try {
+            $Acquired = $Mutex.WaitOne(0)
+            if (-not $Acquired) { throw 'Another ComputerCleanup Disk Cleanup run is active.' }
+            $Keys = @(Get-ChildItem -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches' -ErrorAction Stop)
+            $Selected = @($Keys | Where-Object { $_.PSChildName -in $Sections })
+            if (-not $Selected.Count) { throw 'None of the selected Disk Cleanup handlers are installed.' }
+            $Used = @($Keys | ForEach-Object { (Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction Stop).PSObject.Properties.Name })
+            $Preset = 9000
+            while ($Preset -le 9999 -and ('StateFlags{0:D4}' -f $Preset) -in $Used) { $Preset++ }
+            if ($Preset -gt 9999) { throw 'No unused Disk Cleanup preset is available.' }
+            $Flag = 'StateFlags{0:D4}' -f $Preset
+            foreach ($Key in $Selected) {
+                $Touched.Add($Key.PSPath)
+                New-ItemProperty -LiteralPath $Key.PSPath -Name $Flag -Value 2 -PropertyType DWord -ErrorAction Stop | Out-Null
+            }
+            $Process = Start-Process -FilePath $Executable -ArgumentList "/sagerun:$Preset" -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop
+            if ($Process.ExitCode -ne 0) { throw "Disk Cleanup exited with code $($Process.ExitCode)." }
         }
-
-        $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $Before    = Get-DiskSpace
-
-        $CleanMgrPath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\cleanmgr.exe'
-
-        # Check if Disk Cleanup is installed; if not, attempt installation (Server 2008 R2)
-        if (-not (Test-Path $CleanMgrPath)) {
-            Write-Warning 'Windows Cleanup NOT installed! Trying installation...'
-            try {
-                $WinsxsCleanMgr = Join-Path -Path $env:SystemRoot -ChildPath 'Winsxs\amd64_microsoft-windows-cleanmgr_31bf3856ad364e35_6.1.7600.16385_none_c9392808773cd7da\cleanmgr.exe'
-                $WinsxsMui      = Join-Path -Path $env:SystemRoot -ChildPath 'Winsxs\amd64_microsoft-windows-cleanmgr.resources_31bf3856ad364e35_6.1.7600.16385_en-us_b9cb6194b257cc63\cleanmgr.exe.mui'
-
-                if (Test-Path $WinsxsCleanMgr) {
-                    Copy-Item $WinsxsCleanMgr -Destination (Join-Path -Path $env:SystemRoot -ChildPath 'System32')
-                }
-                if (Test-Path $WinsxsMui) {
-                    Copy-Item $WinsxsMui -Destination (Join-Path -Path $env:SystemRoot -ChildPath 'System32\en-US')
-                }
-                elseif (-not (Get-WindowsFeature 'Desktop-Experience')) {
-                    Write-Verbose 'Manual file copy failed. Installing Desktop Experience feature...'
-                    Install-WindowsFeature 'Desktop-Experience'
-                }
+        finally {
+            $RestoreFailures = @()
+            foreach ($Path in $Touched) {
+                try { Remove-ItemProperty -LiteralPath $Path -Name $Flag -ErrorAction Stop }
+                catch { $RestoreFailures += $Path; Write-Warning "Could not remove temporary Disk Cleanup flag from '$Path'." }
             }
-            catch {
-                Write-Error $_
-            }
-        }
-
-        # Verify Disk Cleanup is available before continuing
-        if (-not (Test-Path $CleanMgrPath)) {
-            throw 'Windows Disk Cleanup tool not installed! Aborting...'
-        }
-
-        # Enabled sections for Disk Cleanup
-        $Sections = @(
-            'Active Setup Temp Folders',
-            'BranchCache',
-            'Device Driver Packages',
-            'Downloaded Program Files',
-            #'DownloadsFolder',
-            'GameNewsFiles',
-            'GameStatisticsFiles',
-            'GameUpdateFiles',
-            #'Memory Dump Files',
-            'Offline Pages Files',
-            'Old ChkDsk Files',
-            'Previous Installations',
-            #'Recycle Bin',
-            'Service Pack Cleanup',
-            'Setup Log Files',
-            #'System error memory dump files',
-            #'System error minidump files',
-            'Temporary Files',
-            'Temporary Setup Files',
-            #'Temporary Sync Files',
-            'Thumbnail Cache',
-            'Update Cleanup',
-            'Upgrade Discarded Files',
-            #'User file versions',
-            'Windows Defender',
-            'Windows ESD installation files',
-            'Windows Error Reporting Archive Files',
-            'Windows Error Reporting Queue Files',
-            'Windows Error Reporting System Archive Files',
-            'Windows Error Reporting System Queue Files',
-            'Windows Upgrade Log Files'
-        )
-    }
-
-    process {
-        # Clear current registry entries
-        if ($PSCmdlet.ShouldProcess('CleanMgr registry keys', 'Clear existing StateFlags0001')) {
-            Write-Verbose 'Clearing current CleanMgr.exe automation settings...'
-            $RegistryParams = @{
-                Path        = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches\*'
-                Name        = 'StateFlags0001'
-                ErrorAction = 'SilentlyContinue'
-            }
-            [void] (Get-ItemProperty @RegistryParams | Remove-ItemProperty -Name 'StateFlags0001' -ErrorAction SilentlyContinue)
-        }
-
-        # Add registry entries for enabled sections
-        if ($PSCmdlet.ShouldProcess('CleanMgr registry keys', 'Set StateFlags0001 for enabled sections')) {
-            Write-Verbose 'Adding enabled disk cleanup sections...'
-            foreach ($Key in $Sections) {
-                $RegistryPath = "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches\$Key"
-                try {
-                    [Microsoft.Win32.Registry]::SetValue(
-                        $RegistryPath,
-                        'StateFlags0001',
-                        1,
-                        [Microsoft.Win32.RegistryValueKind]::DWord
-                    )
-                }
-                catch {
-                    Write-Verbose "Failed to set StateFlags0001 for '$Key': $($_.Exception.Message)"
-                }
-            }
-        }
-
-        if ($PSCmdlet.ShouldProcess('cleanmgr.exe /sagerun:1', 'Run Disk Cleanup')) {
-            try {
-                Write-Verbose 'Running CleanMgr.exe...'
-
-                $ExistingDismHostIds = @(
-                    Get-Process -Name 'dismhost' -ErrorAction SilentlyContinue |
-                        Select-Object -ExpandProperty Id
-                )
-
-                $CleanMgrProcess = Start-Process -FilePath $CleanMgrPath -ArgumentList '/sagerun:1' -NoNewWindow -PassThru
-                Wait-Process -Id $CleanMgrProcess.Id -ErrorAction SilentlyContinue
-
-                Write-Verbose 'Waiting for new DismHost cleanup processes to finish...'
-                $DismHostTimeoutSeconds = 900
-                $Deadline = (Get-Date).AddSeconds($DismHostTimeoutSeconds)
-
-                do {
-                    $NewDismHost = @(
-                        Get-Process -Name 'dismhost' -ErrorAction SilentlyContinue |
-                            Where-Object { $ExistingDismHostIds -notcontains $_.Id }
-                    )
-
-                    if ($NewDismHost.Count -eq 0) {
-                        break
-                    }
-
-                    Start-Sleep -Seconds 1
-                }
-                while ((Get-Date) -lt $Deadline)
-
-                if ($NewDismHost.Count -gt 0) {
-                    Write-Warning 'Timed out waiting for CleanMgr child DismHost process(es). Continuing with remaining cleanup steps.'
-                }
-            }
-            catch {
-                Write-Error "Invoke-CleanManager: $($_.Exception.Message)"
-            }
+            if ($Acquired) { $Mutex.ReleaseMutex() }
+            $Mutex.Dispose()
+            if ($RestoreFailures.Count) { throw 'Temporary Disk Cleanup flags could not all be removed; inspect the reported registry paths.' }
         }
     }
-
-    end {
-        New-CleanupReport -Name 'CleanManager' -StopWatch $StopWatch -DiskBefore $Before
-    }
+    New-CleanupReport -Name 'CleanManager' -StopWatch $StopWatch -DiskBefore $Before
 }
-

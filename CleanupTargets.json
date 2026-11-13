@@ -37,10 +37,8 @@
       ],
       "RelativePaths": [
         "AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files",
-        "AppData\\Local\\Microsoft\\Windows\\WebCache",
         "AppData\\Local\\Microsoft\\Windows\\INetCache\\Content.IE5",
-        "AppData\\Local\\Microsoft\\Windows\\INetCache\\Low\\Content.IE5",
-        "AppData\\Local\\Microsoft\\Internet Explorer\\DOMStore"
+        "AppData\\Local\\Microsoft\\Windows\\INetCache\\Low\\Content.IE5"
       ]
     },
     "Firefox": {
@@ -54,9 +52,7 @@
       "RelativePaths": [
         "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\cache",
         "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\cache2\\entries",
-        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\thumbnails",
-        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\webappsstore.sqlite",
-        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\chromeappsstore.sqlite"
+        "AppData\\Local\\Mozilla\\Firefox\\Profiles\\*.default*\\thumbnails"
       ]
     }
   },
@@ -70,12 +66,8 @@
         "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Teams"
       ],
       "RelativePaths": [
-        "AppData\\Roaming\\Microsoft\\Teams\\blob_storage",
-        "AppData\\Roaming\\Microsoft\\Teams\\databases",
         "AppData\\Roaming\\Microsoft\\Teams\\cache",
         "AppData\\Roaming\\Microsoft\\Teams\\gpucache",
-        "AppData\\Roaming\\Microsoft\\Teams\\Indexeddb",
-        "AppData\\Roaming\\Microsoft\\Teams\\Local Storage",
         "AppData\\Roaming\\Microsoft\\Teams\\tmp"
       ]
     },
