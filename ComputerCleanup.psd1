@@ -25,7 +25,7 @@ GUID = '560a6a80-ba3a-4a98-95b9-e61546aa3307'
 Author = 'Tom de Leeuw'
 
 # Company or vendor of this module
-CompanyName = 'Tom de Leeuw'
+CompanyName = 'SysTom'
 
 # Copyright statement for this module
 Copyright = '(c) 2026 Tom de Leeuw. Licensed under the MIT License.'
