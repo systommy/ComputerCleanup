@@ -28,7 +28,7 @@ Author = 'Tom de Leeuw'
 CompanyName = 'Tom de Leeuw'
 
 # Copyright statement for this module
-Copyright = '(c) Tom de Leeuw. All rights reserved.'
+Copyright = '(c) 2026 Tom de Leeuw. Licensed under the MIT License.'
 
 # Description of the functionality provided by this module
 Description = 'Preview Windows maintenance module with explicit cleanup selection, guarded file deletion, service recovery and disk-space reporting. Disposable VM acceptance required before release.'
@@ -101,6 +101,7 @@ FileList = @(
     'ComputerCleanup.psd1',
     'ComputerCleanup.psm1',
     'CleanupTargets.json',
+    'LICENSE',
     'Public\Invoke-ComputerCleanup.ps1',
     'Public\Optimize-UserProfiles.ps1',
     'Public\Optimize-SystemFiles.ps1',
@@ -135,7 +136,7 @@ PrivateData = @{
         Tags = @('Cleanup', 'DiskSpace', 'TempFiles', 'Maintenance', 'RDS', 'Windows', 'Cache', 'BrowserCache', 'Administration')
 
         # A URL to the license for this module.
-        # License selection is pending; no license grant is asserted.
+        LicenseUri = 'https://github.com/systommy/ComputerCleanup/blob/master/LICENSE'
 
         # A URL to the main website for this project.
         ProjectUri = 'https://github.com/systommy/ComputerCleanup'
@@ -144,7 +145,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'Unreleased safety preparation. See CHANGELOG.md; VM acceptance and licensing remain pending.'
+        ReleaseNotes = 'Unreleased safety preparation. See CHANGELOG.md; MIT licensed; VM acceptance remains pending.'
 
         # Prerelease string of this module
         Prerelease = 'preview1'

@@ -2,7 +2,8 @@
 
 ## 3.0.1-preview1 — unreleased
 
-- Reconciled current GitHub and archive source; restored required JSON definitions omitted from an earlier preparation snapshot. Preserved module GUID and eight public commands; updated personal credits and repository URL. Licensing remains pending.
+- Licensed under MIT (owner decision, 13 November 2026); added LICENSE, manifest LicenseUri and FileList entry.
+- Reconciled current GitHub and archive source; restored required JSON definitions omitted from an earlier preparation snapshot. Preserved module GUID and eight public commands; updated personal credits and repository URL.
 - Guarded browser/Teams shutdown with ShouldProcess; explicit Confirm overrides Force. Added WhatIf support inside deletion, process, service and logging helpers.
 - Replaced recursive deletion with literal, reparse-aware traversal and file-level age/size rules. Empty directories are removed nonrecursively. New files survive stale parents.
 - Switched user cleanup from last-access to last-write age; size parameters are numeric bytes. Downloads works independently of UserTemp. Invalid extensions are rejected.

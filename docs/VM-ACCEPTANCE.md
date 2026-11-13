@@ -12,4 +12,4 @@ Do not run this checklist on a personal workstation, a production/RDS server or 
 8. Test current-user/system-drive Recycle Bin semantics with synthetic deleted files, and verify other drives/users are not represented as cleaned. Test transcript start/stop failure and batch failure. Keep logs private. Test legacy email only with a disposable controlled sink, if that compatibility path will be supported.
 9. Restore snapshots and repeat on both engines/OS targets. Record deviations and narrow documented support before release. If any safety invariant fails, block release and add a regression test.
 
-Acceptance evidence has **not** been collected for real service/process/registry/Recycle Bin operations in this batch. Publication remains blocked on this checklist and licensing approval.
+Acceptance evidence has **not** been collected for real service/process/registry/Recycle Bin operations in this batch. Publication remains blocked on this checklist.

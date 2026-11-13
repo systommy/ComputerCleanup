@@ -2,7 +2,7 @@
 
 **Tom de Leeuw / automatom — a Windows maintenance module with explicit cleanup choices, PowerShell confirmation, and disk-space reporting.**
 
-This is the **unreleased 3.0.1-preview1 preparation build**. Automated checks use mocks and disposable synthetic files. Real Windows servicing, application recovery and disk-space acceptance still require a disposable VM. Licensing is pending; see [LICENSING.md](LICENSING.md). Do not substitute an older PowerShell Gallery package for this reviewed source.
+This is the **unreleased 3.0.1-preview1 preparation build**. Automated checks use mocks and disposable synthetic files. Real Windows servicing, application recovery and disk-space acceptance still require a disposable VM. Licensed under the [MIT License](LICENSE). Do not substitute an older PowerShell Gallery package for this reviewed source.
 
 ## Purpose and scope
 

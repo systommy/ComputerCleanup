@@ -1,7 +1,7 @@
-# Licensing status: decision pending
+# Licensing
 
-No LICENSE file was present in the reviewed current source or either of its two historical commits. The old manifest pointed to a license URL, but that link did not establish a license grant in this checkout. No license has been added or changed in this preparation batch.
+ComputerCleanup is licensed under the [MIT License](LICENSE), copyright (c) 2026 Tom de Leeuw. The owner selected MIT on 13 November 2026.
 
-Tom de Leeuw has confirmed personal authorship of this portfolio project. The prepared metadata credits Tom de Leeuw. No explicitly attributed third-party implementation or bundled dependency was identified in the reviewed module source. Pester, PSScriptAnalyzer, GitHub Actions and Gitleaks are separate development dependencies and retain their respective licenses; they are not vendored into this project.
+No LICENSE file existed in either historical commit. Earlier commits carry no license grant. The MIT grant applies from the commit that adds `LICENSE` onward.
 
-Proposed decision: MIT for Tom's original code if permissive reuse is the intended publication policy. Approval is still required before adding its text and updating the manifest's LicenseUri. Preserve any third-party notices if additional code is introduced. The current preparation build does not assert MIT licensing.
+No explicitly attributed third-party implementation or bundled dependency was identified in the module source. Pester, PSScriptAnalyzer, GitHub Actions and Gitleaks are development tools under their own licenses and are not vendored into this repository. Preserve any third-party notices if outside code is introduced later.
