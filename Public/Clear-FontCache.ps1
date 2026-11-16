@@ -1,70 +1,36 @@
-<#
-    .SYNOPSIS
-    Clears user font cache files located in "C:\Windows\ServiceProfiles\LocalService\AppData\Local\"
-
-    .NOTES
-    Author:   Tom de Leeuw
-    Website:  https://ucsystems.nl / https://tech-tom.com
-#>
 function Clear-FontCache {
-    begin {
-        # Get disk space for comparison afterwards
-        $Before = Get-DiskSpace
-
-        # Location of FontCache files
-        $Folder = "C:\Windows\ServiceProfiles\LocalService\AppData\Local\"
-
-        # Grab only the user cache files
-        $Filter = "FontCache-S-*.dat"
-
-        # Parameters for Get-ChildItem and Remove-Item
-        $CommonParams = @{
-            Recurse       = $true
-            Force         = $true
-            Verbose       = $true
-            ErrorAction   = 'SilentlyContinue'
-            WarningAction = 'SilentlyContinue'
-        }
-    }
-    
-    process {
+    <#
+    .SYNOPSIS
+    Removes selected cache files while restoring the original service state.
+    .DESCRIPTION
+    One confirmation covers stopping services, deleting cache contents and restoring
+    previously running services. Abort on stop failure. Restore in finally. No rename,
+    recursive directory deletion, robocopy, or changes to Download.old.
+    .PARAMETER Force
+    Suppress implicit confirmation. Explicit -Confirm and -WhatIf take precedence.
+    .EXAMPLE
+    Clear-FontCache -WhatIf
+    .OUTPUTS
+    PSCustomObject with duration and observed disk-space delta.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([PSCustomObject])]
+    param([switch] $Force)
+    if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) { $ConfirmPreference = 'None' }
+    Assert-RunAsAdministrator
+    $StopWatch = [Diagnostics.Stopwatch]::StartNew()
+    $Before = Get-DiskSpace
+    $Target = Join-Path $env:SystemRoot 'ServiceProfiles\LocalService\AppData\Local'
+    if (-not (Test-SafeCleanupPath -LiteralPath $Target)) { throw 'Cache target is absent or has an unsafe ancestor.' }
+    if ($PSCmdlet.ShouldProcess($Target, 'Stop related services, remove cache contents, restore previously running services')) {
+        $Restore = @()
         try {
-            Write-Verbose 'Stopping Font Cache service...'
-            Get-Service -Name 'fontcache' | Stop-Service
+            $Restore = @(Stop-ServiceSet -ServiceNames @('fontcache') -Confirm:$false -ErrorAction Stop)
+            Remove-StaleFiles -Paths @($Target) -AgeMode None -FileNamePattern 'FontCache-S-*.dat' -Confirm:$false -ErrorAction Stop
         }
-        catch {
-            Write-Warning $_
-        }
-
-        if (Test-Path -Path $Folder) {
-            try {
-                Get-ChildItem -Path $Folder -Filter $Filter @CommonParams | Remove-Item @CommonParams
-            }
-            catch {
-                Write-Warning $_
-            }
-        }
-
-        try {
-            Write-Verbose 'Starting Font Cache service...'
-            Get-Service -Name 'fontcache' | Start-Service
-        }
-        catch {
-            Write-Warning $_
+        finally {
+            if ($Restore.Count) { Start-ServiceSet -ServiceNames $Restore -Confirm:$false }
         }
     }
-    
-    end {
-        # Get disk space again and calculate difference
-        $After        = Get-DiskSpace
-        $TotalCleaned = "$(($After.FreeSpace - $Before.FreeSpace).ToString('00.00')) GB"
-
-        # Report
-        if ($null -ne $script:CleanupReport) {
-            $script:CleanupReport.FontCache = $TotalCleaned
-        }
-        else {
-            Write-Output "Total space cleaned: $TotalCleaned"
-        }
-    }
+    New-CleanupReport -Name 'FontCache' -StopWatch $StopWatch -DiskBefore $Before
 }

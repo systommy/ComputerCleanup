@@ -1,193 +1,98 @@
 # ComputerCleanup
 
-:warning: `This module is still a work in progress and could be destructive for production environments.`
+**Tom de Leeuw / automatom — a Windows maintenance module with explicit cleanup choices, PowerShell confirmation, and disk-space reporting.**
 
-:warning: `Please use at your own risk!`
+Version 3.0.0 is a major rewrite of the 1.x releases with intentional breaking changes; see [CHANGELOG.md](CHANGELOG.md). Automated checks use mocks and disposable synthetic files, so test real cleanup on a non-production machine first. Licensed under the [MIT License](LICENSE).
 
-This PowerShell module is for freeing up disk space on Windows computers.
-You could use this on RDS servers, or your own local machine.
+## Purpose and scope
 
-You can install the ComputerCleanup module directly from the [PowerShell Gallery](https://www.powershellgallery.com/packages/ComputerCleanup/).
-More information can be found on my [Blog](https://tech-tom.com/posts/powershell-computercleanup-module/)
+ComputerCleanup groups recurring Windows maintenance tasks into eight commands. An administrator selects the categories, previews their scope, approves execution, and receives structured results. No cleanup category runs by default.
 
-## Installation
+The module is intended for a controlled maintenance window on a machine you administer, with users signed out and a recovery snapshot or backup. Deletion is permanent. Browser and Teams cleanup can close matching processes across user sessions. Downloads are personal data, and Recycle Bin cleanup removes a recovery option.
+
+## Environment and permissions
+
+- Windows only; Windows PowerShell 5.1 and PowerShell 7 on Windows are the compatibility targets. The source supports both engines. Full runtime acceptance on Windows 11 and a supported Windows Server VM remains pending.
+- Every public command requires an elevated administrator session, including previews. Importing the module does not require elevation or run cleanup.
+- No external runtime PowerShell modules. Disk Cleanup requires an already installed `cleanmgr.exe`; the module does not install Windows components.
+- User discovery covers physical directories beneath `$env:SystemDrive\Users`, excluding Administrator, Admin, Public and Default. It does not discover relocated profiles, FSLogix/profile containers, remote shares or every special account.
+- Browser/Teams selection uses the registry detection rules in [CleanupTargets.json](CleanupTargets.json). Per-user installations can be missed, especially New Teams for another account. No automatic download or version discovery occurs.
+- Quiesce applications and sessions first. Path checks avoid existing reparse points, but cannot eliminate races where another process swaps a path during an elevated cleanup. Live multi-user/RDS cleanup is outside the tested scope.
+
+## Load this source
+
+From the reviewed project directory:
 
 ```powershell
-# One time setup
-Install-Module ComputerCleanup -AllowClobber -Force 
-
-# If you get errors requesting the PSGallery and/or updating NuGet, try executing the following command before trying again:
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-
-# Import the module.
-Import-Module ComputerCleanup -Force
-
-# Get commands in the module
+Import-Module .\ComputerCleanup.psd1 -Force
 Get-Command -Module ComputerCleanup
-
-# Get help for the module
-Get-Help ComputerCleanup -Full
-
-# Updating
-Update-Module -Name ComputerCleanup
+Get-Help Invoke-ComputerCleanup -Full
 ```
 
-To install the module manually, or if you are using an earlier version of PowerShell that doesn't support Install-Module, simply download the module from GitHub, and copy the ComputerCleanup folder into your Modules folder. 
+Start with a preview in the disposable VM:
 
-If you're not sure where your Modules folder is, open up a PowerShell prompt and enter: `$env:PSModulePath`
+```powershell
+Invoke-ComputerCleanup -UserTemp -SystemTemp -Days 30 -WhatIf
 
-## Examples/Usage
-
-Generally, the only function/command you'll need is `Invoke-ComputerCleanup`.
-
-I'll give two recommended parameter sets. One for running on a live/in-use environment, and one for outside of working hours.
-
-### LIVE environment:
-``` powershell
-Invoke-ComputerCleanup -Days 30 -UserTemp -SystemTemp -CleanManager -SoftwareDistribution -RecycleBin 
-```
-```txt
-- Runs the Windows Disk Cleanup tool.
-- Removes temp files in User profiles that are older than 30 days old.
-- Removes temp files in System that are older than 30 days old.
-- Cleans up the "C:\Windows\SoftwareDistribution\Download" folder.
-- Clears the Windows Recycle Bin
-```
-### Outside of working hours:
-:warning: `This parameter set will close running processes! Use with caution.`
-- You could use this as a weekly scheduled task.
-``` powershell
-Invoke-ComputerCleanup -Days 30 -UserTemp -SystemTemp -CleanManager -SoftwareDistribution -BrowserCache -TeamsCache -FontCache -RecycleBin 
-```
-```txt
-- Runs the Windows Disk Cleanup tool.
-- Removes temp files in User profiles that are older than 30 days old.
-- Removes temp files in System that are older than 30 days old.
-- Cleans up the "C:\Windows\SoftwareDistribution\Download" folder.
-- Clears cache for all browsers
-- Clears Microsoft Teams Cache
-- Clears Windows Font Cache
-- Clears the Windows Recycle Bin
-```
-You'll be prompted for confirmation at the beginning, and there will be a report at the end.
-
-![Invoke-ComputerCleanup](https://tech-tom.com/computercleanup_example1_start.png#center)
-![Invoke-ComputerCleanup](https://tech-tom.com/computercleanup_example1_finish.png#center)
-
-Some parameters will kill multiple processes, which can be impactful in live environments.
-Therefore, I've added warnings for some parameters. Example:
-
-``` powershell
-Invoke-ComputerCleanup -Days 30 -BrowserCache -TeamsCache -UserDownloads
+# Only after inspecting the VM and taking a snapshot:
+$results = Invoke-ComputerCleanup -UserTemp -SystemTemp -Days 30 -Confirm
+$results | Format-Table
 ```
 
-:information_source: You can use the `-Force` parameter to skip all confirmation prompts.
+`-WhatIf` describes selected operations; it is **not an exhaustive file inventory or a byte estimate**. The orchestrator previews the batch and returns without starting a transcript, stopping processes/services, sending mail or invoking child cleanup. Individual commands preview their category or target directories. A preview still performs read-only prerequisite checks and can fail if a target/tool is unavailable.
 
-![paramwarnings](https://tech-tom.com/paramwarnings.png#center)
+`-Force` suppresses implicit confirmation. Explicit `-Confirm` takes precedence, and `-WhatIf -Force` never performs the selected operations. `-Confirm:$false` is intended for reviewed automation. Services are stopped, files removed and original services restored as a single approved transaction; restoration is not a second optional prompt.
 
-## Parameters for function: "Invoke-ComputerCleanup"
+## Commands and consequences
 
-#### -Days (Default: 30)
-	- Only remove files/folders that are older than $Days old. 
-		- This is based on both file CreationTime AND LastWriteTime.
-	- This parameter does NOT apply to the following options:
-		-BrowserCache
-		-TeamsCache
-		-SoftwareDistribution
-		-FontCache
+| Command | Selection and effect | Age filter |
+|---|---|---|
+| `Invoke-ComputerCleanup` | Runs only selected switches; returns one result per selected section and creates a transcript after approval | Passes `-Days` to user/system cleanup |
+| `Optimize-UserProfiles` | `-TempFiles`; optional `-Downloads -ArchiveFiles` or `-GenericFiles` | Creation **and** last-write time must be older than cutoff |
+| `Optimize-SystemFiles` | `-TempFiles`; optional current account's `-RecycleBin` on the system drive | Temp files only; Recycle Bin ignores age |
+| `Clear-BrowserCache` | `-Browsers All,Chrome,Edge,IE,Firefox`; closes matching browser processes, clears configured cache paths | None |
+| `Clear-TeamsCache` | Closes detected Teams processes; clears configured cache paths | None |
+| `Clear-FontCache` | Stops FontCache, clears `FontCache-S-*.dat`, restores previously running service | None |
+| `Clear-SoftwareDistribution` | Stops Windows Update/BITS, clears **contents** of `SoftwareDistribution\Download`, restores services | None |
+| `Invoke-CleanManager` | Runs installed Disk Cleanup with a temporary unused preset; defaults to Temporary Files and Thumbnail Cache | Windows handler rules, not `-Days` |
 
-#### -CleanManager
-	- Runs the Windows Disk Cleanup tool with the following options enabled:
-		- Active Setup Temp Folders
-		- BranchCache
-		- Device Driver Packages
-		- Downloaded Program Files
-		- GameNewsFiles
-		- GameStatisticsFiles
-		- GameUpdateFiles
-		- Memory Dump Files
-		- Offline Pages Files
-		- Old ChkDsk Files
-		- Previous Installations
-		- Service Pack Cleanup
-		- Setup Log Files
-		- System error memory dump files
-		- System error minidump files
-		- Temporary Files
-		- Temporary Setup Files
-		- Thumbnail Cache
-		- Update Cleanup
-		- Upgrade Discarded Files
-		- Windows Defender
-		- Windows ESD installation files
-		- Windows Error Reporting Archive Files
-		- Windows Error Reporting Queue Files
-		- Windows Error Reporting System Archive Files
-		- Windows Error Reporting System Queue Files
-		- Windows Upgrade Log Files
+System temp targets are Windows `Temp`, `Logs\CBS`, `Downloaded Program Files` and ProgramData `Microsoft\Windows\WER`. User temp targets are local WER, Internet Explorer Recovery, Terminal Server Client Cache, CrashDumps and Temp. The JSON file is the authoritative list of browser and Teams patterns. Existing cookies, DOMStore, WebCache databases, Firefox SQLite files and Teams local application databases/storage are excluded from this build's target definitions.
 
-#### -UserTemp
-	- Removes temp files in User profiles that are older than $Days days old. Default locations:
-		- USERPROFILE\AppData\Local\Microsoft\Windows\WER
-		- USERPROFILE\AppData\Local\Microsoft\Windows\INetCache
-		- USERPROFILE\AppData\Local\Microsoft\Internet Explorer\Recovery
-		- USERPROFILE\AppData\Local\Microsoft\Terminal Server Client\Cache
-		- USERPROFILE\AppData\Local\CrashDumps
-		- USERPROFILE\AppData\Local\Temp
+`-UserDownloads` on the orchestrator works independently of `-UserTemp`: it selects zip, rar, 7z and iso files **larger than 500 MB**, recursively under Downloads, subject to the age rule. Direct `Optimize-UserProfiles` supports numeric `-ArchiveSize` (default `500MB`) and `-GenericSize` (default `15MB`), and alphanumeric extension lists. The old quoted size strings have been replaced by byte counts. Files exactly at a size or date threshold are retained.
 
-#### -SystemTemp
-	- Removes temp files in system that are older than $Days days old. Default locations:
-		- C:\Windows\Temp
-		- C:\Windows\Logs\CBS
-		- C:\Windows\Downloaded Program Files
-		- C:\ProgramData\Microsoft\Windows\WER
+```powershell
+# Synthetic maintenance examples: preview first, never real client paths.
+Clear-BrowserCache -Browsers Chrome,Edge -WhatIf
+Optimize-UserProfiles -Days 60 -Downloads -ArchiveFiles -ArchiveSize 1GB -WhatIf
+Invoke-CleanManager -Sections 'Temporary Files','Thumbnail Cache' -WhatIf
+```
 
-#### -SoftwareDistribution
-	- Cleans the "C:\Windows\SoftwareDistribution\Downloads" folder.
+Extra Disk Cleanup categories, such as `Update Cleanup`, `Previous Installations` and `Device Driver Packages`, require explicit selection through `-Sections`. They may remove rollback material. Do not run Windows Update or another Disk Cleanup process concurrently. `cleanmgr.exe` completion does not establish that every independently spawned servicing process has finished; verify the VM before measuring or restarting it.
 
-#### -FontCache
-	- Clears user font cache files located in "C:\Windows\ServiceProfiles\LocalService\AppData\Local"
+## Safety and failure behavior
 
-#### -BrowserCache 
-	- Clears browser cache files for all users.
-	- Browsers: Microsoft Edge, Internet Explorer, Google Chrome and Firefox.
-	- :warning: This will stop ALL running browser processes. Running outside of working hours is advised.
+The shared deletion engine treats targets literally, checks all existing ancestors for reparse points, and enumerates directories one level at a time on both engines. It deletes eligible files individually and only removes empty descendant directories nonrecursively. Target directories are retained. A stale parent never authorizes deletion of a recent child. Junctions, volume roots, UNC paths and parent traversal are refused or skipped.
 
-#### -TeamsCache
-	- Clears Microsoft Teams cache files for all users.
-    - :warning: This will stop ALL running Teams processes. Running outside of working hours is advised.
+Locked/inaccessible files produce errors. The orchestrator uses terminating errors for child failures and stops the batch. Service stop failure aborts deletion and attempts rollback of any partial stop; a `finally` block restores originally running services after cleanup failure. Originally stopped services stay stopped. Recovery failures are surfaced and need operator attention. No rollback of deleted files is available.
 
-#### -RecycleBin
-	- Clears Recycle Bin.
+SoftwareDistribution cleanup no longer renames into `Download.old`, recursively removes that folder, or runs `robocopy /MIR`. An existing `Download.old` is left alone. Disk Cleanup preserves pre-existing StateFlags presets and removes only its temporary flags in `finally`.
 
-## Functions\Public
+## Reports, logging and privacy
 
-- [Invoke-ComputerCleanup](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Invoke-ComputerCleanup.ps1) 
-    - Main controller function to invoke one or multiple cleanup functions included in this module.
-- [Clear-BrowserCache](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Clear-BrowserCache.ps1)
-	- Removes browser cache files for all users.
-    - Browsers: Microsoft Edge, Internet Explorer, Google Chrome and Firefox.
-- [Clear-FontCache](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Clear-FontCache.ps1)
-	- Removes user font cache files located in `C:\Windows\ServiceProfiles\LocalService\AppData\Local\`
-- [Clear-SoftwareDistribution](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Clear-SoftwareDistribution.ps1)
-    - Clears the `C:\Windows\SoftwareDistribution\Downloads` folder.
-- [Clear-TeamsCache](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Clear-TeamsCache.ps1) 
-    - Removes Microsoft Teams cache files for all users.
-- [Invoke-CleanManager](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Invoke-CleanManager.ps1) 
-    - Runs the Windows Disk Cleanup tool with predefined options.
-- [Optimize-SystemFiles](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Optimize-SystemFiles.ps1) 
-    - Removes common system-wide temporary files and folders older than `$Days` old.
-    - OPTIONAL: Clears Windows Recycle Bin
-- [Optimize-UserProfiles](https://github.com/tomskovich/ComputerCleanup/blob/main/Public/Optimize-UserProfiles.ps1) 
-    - Removes common temporary files and folders older than `$Days` days old from user profiles.
+Results contain `Name`, `Duration`, `SpaceBeforeGB`, `SpaceAfterGB`, `SpaceCleanedGB` and `IsPreview`. Disk readings use the system drive. `SpaceCleanedGB` is an observed free-space delta rounded to 0.01 GB, **not a verified total of deleted bytes**. Concurrent disk activity can make it negative; do not sum overlapping measurements or claim measured savings from synthetic tests. Preview results report zero and `IsPreview = true`; the orchestrator itself emits no result objects for a skipped/preview batch.
 
-## Functions\Private
+Approved orchestrator runs create a unique transcript under `$env:SystemRoot\Temp`. Only a successfully started transcript is stopped, including when a child fails. Logs can contain local paths, usernames and machine details. Keep them private and apply your own retention policy.
 
-- [Assert-RunAsAdministrator](https://github.com/tomskovich/ComputerCleanup/blob/main/Private/Assert-RunAsAdministrator.ps1) 
-    - Verifies if script/function is running with Administrator privileges.
-- [Get-DiskSpace](https://github.com/tomskovich/ComputerCleanup/blob/main/Private/Get-DiskSpace.ps1)
-    - Gets available disk space. Used for reporting.
-- [Get-UserFolders](https://github.com/tomskovich/ComputerCleanup/blob/main/Private/Get-Userfolders.ps1)
-    - Gets all user folders, excluding Administrators and Default/Public users
-- [Start-Logging](https://github.com/tomskovich/ComputerCleanup/blob/main/Private/Start-Logging.ps1)
-    - Logging function. Very basic wrapper around `Start-Transcript`
+Legacy `-MailReport` remains opt-in and requires `-SmtpServer`, `-SmtpPort`, `-FromAddress` and `-ToAddress`; it has a separate confirmation. It uses obsolete `Send-MailMessage`, with no TLS/authentication configuration in this module. Use it only with an explicitly trusted relay. Prefer routing the returned objects through your approved reporting system. No mail is sent by tests or previews.
+
+## Development and validation
+
+Check changes with PSScriptAnalyzer in both `powershell.exe` and `pwsh.exe`, then preview with `-WhatIf` on a non-production machine:
+
+```powershell
+Invoke-ScriptAnalyzer -Path .\Public, .\Private -Recurse -Severity Warning, Error
+Import-Module .\ComputerCleanup.psd1 -Force
+Invoke-ComputerCleanup -Days 30 -UserTemp -SystemTemp -WhatIf
+```
+
+See [changes](CHANGELOG.md).

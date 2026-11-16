@@ -1,97 +1,115 @@
 <#
     .SYNOPSIS
-    Removes common system-wide temporary files and folders older than $Days old.
-    OPTIONAL: Clears Windows Recycle Bin
-    Folders:
-        "$env:SystemRoot\Temp"
-        "$env:SystemRoot\Logs\CBS"
-        "$env:SystemRoot\Downloaded Program Files"
-        "$env:ProgramData\Microsoft\Windows\WER"
+    Removes common system-wide temporary files and folders older than a specified number of days.
+
+    .DESCRIPTION
+    Cleans system temp directories including Windows\Temp, Logs\CBS,
+    Downloaded Program Files, and Windows Error Reporting folders.
+    Optionally clears the Windows Recycle Bin. Files are filtered by both
+    CreationTime and LastWriteTime against the specified age threshold.
+    Supports -WhatIf, -Confirm, and -Force.
+
+    .PARAMETER Days
+    Only remove files and folders older than this many days. Must be at least 1.
+
+    .PARAMETER TempFiles
+    Enable removal of system-wide temporary files.
+
+    .PARAMETER RecycleBin
+    Enable clearing of the Windows Recycle Bin.
+
+    .PARAMETER Force
+    Suppresses implicit confirmation. Explicit -Confirm and -WhatIf take precedence.
+
+    .EXAMPLE
+    Optimize-SystemFiles -Days 30 -TempFiles
+    Removes system temp files older than 30 days.
+
+    .EXAMPLE
+    Optimize-SystemFiles -Days 7 -TempFiles -RecycleBin -Force
+    Removes system temp files older than 7 days and empties the Recycle Bin without confirmation.
+
+    .EXAMPLE
+    Optimize-SystemFiles -Days 30 -TempFiles -WhatIf
+    Shows what would be removed without actually deleting files.
+
+    .OUTPUTS
+    [PSCustomObject] Cleanup result with Name, Duration, SpaceBeforeGB, SpaceAfterGB, SpaceCleanedGB.
 
     .NOTES
     Author:   Tom de Leeuw
-    Website:  https://ucsystems.nl / https://tech-tom.com
+    Website:  https://systom.dev
 #>
 function Optimize-SystemFiles {
-    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([PSCustomObject])]
     param(
-        # Only remove files and folders older than $Days old. 
-        [Parameter(Mandatory = $true, Position = 0)]
+        [Parameter(Mandatory, Position = 0)]
+        [ValidateRange(1, [int]::MaxValue)]
         [int] $Days,
 
-        # Removes common system-wide temporary files and folders older than $Days old.
-        [switch] $TempFiles = $true,
+        [Parameter()]
+        [switch] $TempFiles,
 
-        # Clears Windows Recycle Bin
-        [switch] $RecycleBin
+        [Parameter()]
+        [switch] $RecycleBin,
+
+        [Parameter()]
+        [switch] $Force
     )
 
     begin {
-        # Get disk space for comparison afterwards
-        $Before = Get-DiskSpace
-
-        # Folders to clean up
-        $Folders = @(
-            "$env:SystemRoot\Temp",
-            "$env:SystemRoot\Logs\CBS",
-            "$env:SystemRoot\Downloaded Program Files",
-            "$env:ProgramData\Microsoft\Windows\WER"
-        )
-
-        # Parameters for Get-ChildItem and Remove-Item
-        $CommonParams = @{
-            Recurse       = $true
-            Force         = $true
-            Verbose       = $true
-            ErrorAction   = 'SilentlyContinue'
-            WarningAction = 'SilentlyContinue'
+        if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
+            $ConfirmPreference = 'None'
         }
+
+        Assert-RunAsAdministrator
+
+        $StopWatch  = [System.Diagnostics.Stopwatch]::StartNew()
+        $Before     = Get-DiskSpace
+        $CutoffDate = (Get-Date).AddDays(-$Days)
+
+        $Folders = @(
+            (Join-Path -Path $env:SystemRoot -ChildPath 'Temp')
+            (Join-Path -Path $env:SystemRoot -ChildPath 'Logs\CBS')
+            (Join-Path -Path $env:SystemRoot -ChildPath 'Downloaded Program Files')
+            (Join-Path -Path $env:ProgramData -ChildPath 'Microsoft\Windows\WER')
+        )
     }
 
     process {
-        # Common temp files
-        if ($TempFiles -eq $true) {
-            Write-Verbose "Cleaning SYSTEM folders/files older than $Days days old..."
+        if ($TempFiles) {
+            Write-Verbose "Cleaning SYSTEM folders/files older than $Days days..."
             foreach ($Folder in $Folders) {
                 if (Test-Path -Path $Folder) {
-                    try {
-                        Get-ChildItem -Path $Folder @CommonParams |
-                            Where-Object { ($_.CreationTime -and $_.LastWriteTime -lt $(Get-Date).AddDays(-$Days)) } |
-                                Remove-Item @CommonParams
-                    }
-                    catch {
-                        Write-Error $_
+                    if ($PSCmdlet.ShouldProcess($Folder, "Remove files older than $Days days")) {
+                        try {
+                            Remove-StaleFiles -Paths @($Folder) -CutoffDate $CutoffDate -AgeMode 'CreationAndLastWrite' -Confirm:$false -ErrorAction Stop
+                        }
+                        catch {
+                            Write-Error $_
+                        }
                     }
                 }
             }
+            Write-Verbose 'Finished removing system temp files.'
         }
 
-        # Empty Recycle Bin
-        if ($RecycleBin -eq $true) {
-            try {
-                Write-Verbose 'Clearing Recycle Bin'
-                Clear-RecycleBin -Force
-            }
-            catch {
-                Write-Error $_
+        if ($RecycleBin) {
+            if ($PSCmdlet.ShouldProcess('Recycle Bin', 'Clear all items')) {
+                try {
+                    Write-Verbose 'Clearing Recycle Bin...'
+                    Clear-RecycleBin -DriveLetter $env:SystemDrive.Substring(0, 1) -Force -ErrorAction Stop
+                }
+                catch {
+                    Write-Error $_
+                }
             }
         }
-    } # end Process
+    }
 
     end {
-        # Get disk space again and calculate difference
-        $After        = Get-DiskSpace
-        $TotalCleaned = "$(($After.FreeSpace - $Before.FreeSpace).ToString('00.00')) GB"
-
-        # Report
-        if ($null -ne $script:CleanupReport -and $TempFiles -eq $true) {
-            $script:CleanupReport.SystemFiles = $TotalCleaned
-        }
-        elseif ($null -ne $script:CleanupReport -and $RecycleBin -eq $true) {
-            $script:CleanupReport.RecycleBin = $TotalCleaned
-        }
-        else {
-            Write-Output "Total space cleaned: $TotalCleaned"
-        }
+        New-CleanupReport -Name 'SystemFiles' -StopWatch $StopWatch -DiskBefore $Before
     }
 }

@@ -1,157 +1,128 @@
 <#
     .SYNOPSIS
     Clears browser cache files for all users.
-    Browsers: Microsoft Edge, Internet Explorer, Google Chrome and Firefox.
+
+    .DESCRIPTION
+    Removes cached files for Microsoft Edge, Internet Explorer, Google Chrome,
+    and Firefox across all user profiles. Kills running browser processes before
+    cleaning. Supports -WhatIf, -Confirm, and -Force.
+
+    .PARAMETER Browsers
+    Which browsers to clean. Valid values: All, Chrome, Edge, IE, Firefox.
+    Defaults to 'All'.
+
+    .PARAMETER Force
+    Suppresses implicit confirmation; explicit -Confirm and -WhatIf still take precedence.
+
+    .EXAMPLE
+    Clear-BrowserCache
+    Clears cache for all browsers (prompts for confirmation).
+
+    .EXAMPLE
+    Clear-BrowserCache -Browsers Chrome, Edge -Force
+    Clears Chrome and Edge cache without confirmation.
+
+    .EXAMPLE
+    Clear-BrowserCache -WhatIf
+    Shows what would be cleaned without actually removing files.
+
+    .OUTPUTS
+    [PSCustomObject] Cleanup result with Name, Duration, SpaceBeforeGB, SpaceAfterGB, SpaceCleanedGB.
 
     .NOTES
     Author:   Tom de Leeuw
-    Website:  https://ucsystems.nl / https://tech-tom.com
+    Website:  https://systom.dev
 #>
 function Clear-BrowserCache {
-    [CmdletBinding(ConfirmImpact='Medium', SupportsShouldProcess = $true)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([PSCustomObject])]
     param(
-        # Enabling this parameter will skip confirmation.
-        [Parameter(ValuefromPipeline = $True)]
-        [Switch] $Force,
-
+        [Parameter()]
         [ValidateNotNullOrEmpty()]
-        [ValidateSet("All", "Chrome", "Edge", "IE", "Firefox")]
+        [ValidateSet('All', 'Chrome', 'Edge', 'IE', 'Firefox')]
         [Alias('Browser')]
-        [string[]] $Browsers = "All"
+        [string[]] $Browsers = 'All',
+
+        [Parameter()]
+        [switch] $Force
     )
 
     begin {
-        # Verify if running as Administrator
+        if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
+            $ConfirmPreference = 'None'
+        }
+
         Assert-RunAsAdministrator
 
-        # Get disk space for comparison afterwards
-        $Before = Get-DiskSpace
+        $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $Before    = Get-DiskSpace
+        $Users     = Get-UserFolders
 
-        # Get all user folders, exclude administrators and default users
-        $Users = Get-UserFolders
+        $CleanupDefinitions = Get-CleanupDefinition
+        $BrowserDefinitions = $CleanupDefinitions.Browsers
 
-        # Initialize empty array to add folders to
-        $Folders = @()
-        $BrowserProcesses = @()
+        if ($Browsers -contains 'All') {
+            $SelectedBrowserNames = @('Chrome', 'Edge', 'IE', 'Firefox')
+        }
+        else {
+            $SelectedBrowserNames = $Browsers
+        }
 
-        # Edge (Chromium)
-        $EdgeFolders = @(
-            'AppData\Local\Microsoft\Edge\User Data\Default\Cache',
-            'AppData\Local\Microsoft\Edge\User Data\Default\Cache\Cache_Data'
-        )
-
-        # Internet Explorer
-        $IEFolders = @(
-            'AppData\Local\Microsoft\Windows\Temporary Internet Files',
-            'AppData\Local\Microsoft\Windows\WebCache',
-            'AppData\Local\Microsoft\Windows\INetCache\Content.IE5',
-            'AppData\Local\Microsoft\Windows\INetCache\Low\Content.IE5',
-            'AppData\Local\Microsoft\Internet Explorer\DOMStore'
-        )
-
-        # Google Chrome
-        $ChromeFolders = @(
-            'AppData\Local\Google\Chrome\User Data\Default\Cache',
-            'AppData\Local\Google\Chrome\User Data\Default\Cache2\entries',
-            'AppData\Local\Google\Chrome\User Data\Default\Media Cache',
-            'AppData\Local\Google\Chrome\User Data\Default\Code Cache'
-        )
-
-        # Firefox
-        $FireFoxFolders = @(
-            'AppData\Local\Mozilla\Firefox\Profiles\*.default\cache',
-            'AppData\Local\Mozilla\Firefox\Profiles\*.default\cache2\entries',
-            'AppData\Local\Mozilla\Firefox\Profiles\*.default\thumbnails',
-            'AppData\Local\Mozilla\Firefox\Profiles\*.default\webappsstore.sqlite',
-            'AppData\Local\Mozilla\Firefox\Profiles\*.default\chromeappsstore.sqlite'
-        )
-
-        switch ($Browsers) {
-            { $_ -match 'All' } { 
-                # Add all folders
-                $Folders = $EdgeFolders + $IEFolders + $ChromeFolders + $FireFoxFolders
-                # Change variable value from "All" to list of all browsers
-                $Browsers = @("Chrome","Edge","IE","Firefox")
-                $BrowserProcesses = @('msedge', 'iexplore', 'chrome', 'firefox')
+        $EnabledBrowserNames = New-Object System.Collections.Generic.List[string]
+        foreach ($BrowserName in $SelectedBrowserNames) {
+            $Definition = $BrowserDefinitions[$BrowserName]
+            if ($null -eq $Definition) {
+                continue
             }
-            { $_ -match 'Edge' } { 
-                $Folders = $Folders + $EdgeFolders
-                $BrowserProcesses = $BrowserProcesses + 'msedge'
+
+            $IsInstalled = $false
+            foreach ($RegistryPath in @($Definition.RegistryDetection)) {
+                if (Test-RegistryPathExists -Path $RegistryPath) {
+                    $IsInstalled = $true
+                    break
+                }
             }
-            { $_ -match 'IE' } { 
-                $Folders = $Folders + $IEFolders
-                $BrowserProcesses = $BrowserProcesses + 'iexplore'
+
+            if ($IsInstalled) {
+                $EnabledBrowserNames.Add($BrowserName)
             }
-            { $_ -match 'Chrome' } {
-                $Folders = $Folders + $ChromeFolders
-                $BrowserProcesses = $BrowserProcesses + 'chrome'
-            }
-            { $_ -match 'Firefox' } { 
-                $Folders = $Folders + $FireFoxFolders
-                $BrowserProcesses = $BrowserProcesses + 'firefox'
+            else {
+                Write-Verbose "Skipping browser '$BrowserName' because no installation registry keys were found."
             }
         }
+
+        $BrowserProcesses = @(
+            foreach ($BrowserName in $EnabledBrowserNames) {
+                @($BrowserDefinitions[$BrowserName].ProcessName)
+            }
+        ) | Select-Object -Unique
     }
 
     process {
-        Write-Verbose "Starting browser cache cleanup process..."
+        Write-Verbose 'Starting browser cache cleanup process...'
 
-        # Prompt for user verification before continuing
-        if ( -not ($Force)) {
-            Get-UserConfirmation -WarningMessage "This will stop all running Browser processes!"
+        if (-not $PSCmdlet.ShouldProcess('Browser caches across selected local profiles', 'Close matching processes and permanently remove selected cache data')) { return }
+        if (@($BrowserProcesses).Count -gt 0) {
+            Stop-ProcessGracefully -ProcessNames $BrowserProcesses -Confirm:$false
         }
 
-        # Kill browser process(es)
-        foreach ($Browser in $BrowserProcesses) {
-            try {
-                Write-Verbose "Killing $Browser process(es)..."
-                Get-Process -ProcessName $Browser -ErrorAction 'Stop' | Stop-Process -Force -Confirm:$false
-            }
-            catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
-                Write-Information "No running $($_.Exception.ProcessName) processes."
-            }
-            catch {
-                Write-Error "$($Browser): $($_.Exception.Message)"
-            }
-        }
+        foreach ($UserName in $Users) {
+            $UserProfilePath = Join-Path -Path "$env:SYSTEMDRIVE\Users" -ChildPath $UserName
 
-        # Start cleaning files
-        ForEach ($Username In $Users) {
-            $FilesToClean = ForEach ($Folder In $Folders) {
-                $FolderToClean = "$env:SYSTEMDRIVE\Users\$Username\$Folder"
-                If (Test-Path -Path $FolderToClean) {
-                    Write-Host "Cleaning $($FolderToClean)"
-                    try {
-                        Get-ChildItem -Path $FolderToClean -File -Recurse -Force -Verbose -ErrorAction 'SilentlyContinue'
-                    }
-                    catch [System.IO.IOException] {
-                        Write-Error "File in use: $($_.TargetObject)"
-                    }
-                    catch [System.UnauthorizedAccessException] {
-                        Write-Error "Access denied for path: $($_.TargetObject)"
-                    }
-                    catch {
-                        Write-Error "$($Username): $($_.Exception.Message)"
-                    }
+            foreach ($BrowserName in $EnabledBrowserNames) {
+                $Definition = $BrowserDefinitions[$BrowserName]
+                $FoldersToClean = Get-ExpandedUserRelativePaths -UserProfilePath $UserProfilePath -RelativePaths @($Definition.RelativePaths)
+
+                foreach ($FolderToClean in $FoldersToClean) {
+                    Remove-StaleFiles -Paths @($FolderToClean) -AgeMode 'None' -Confirm:$false -ErrorAction Stop
                 }
             }
-            $FilesToClean | Remove-Item -Recurse -Force -Verbose -ErrorAction 'SilentlyContinue'
-            Write-Information "Removed browser cache files for $Username."
+
+            Write-Verbose "Finished removing browser cache files for $UserName."
         }
     }
 
     end {
-        # Get disk space again and calculate difference
-        $After        = Get-DiskSpace
-        $TotalCleaned = "$(($After.FreeSpace - $Before.FreeSpace).ToString('00.00')) GB"
-
-        # Report
-        if ($null -ne $script:CleanupReport) {
-            $script:CleanupReport.BrowserCache = $TotalCleaned
-        }
-        else {
-            Write-Output "Total space cleaned: $TotalCleaned"
-        }
+        New-CleanupReport -Name 'BrowserCache' -StopWatch $StopWatch -DiskBefore $Before
     }
 }
-

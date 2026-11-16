@@ -1,118 +1,170 @@
 <#
     .SYNOPSIS
-    Removes common temporary files and folders older than $Days days old from user profiles.
-    Folders:
-        - USER\AppData\Local\Microsoft\Windows\WER'
-        - USER\AppData\Local\Microsoft\Windows\INetCache'
-        - USER\AppData\Local\Microsoft\Internet Explorer\Recovery'
-        - USER\AppData\Local\Microsoft\Terminal Server Client\Cache'
-        - USER\AppData\Local\CrashDumps'
-        - USER\AppData\Local\Temp
-    OPTIONAL: Remove specific filetypes from users' downloads folder.
+    Removes common temporary files and folders from user profiles older than a specified number of days.
+
+    .DESCRIPTION
+    Cleans per-user temp directories including Windows Error Reporting, IE Recovery,
+    Terminal Server Client Cache, CrashDumps, and Local\Temp across all user profiles.
+    Optionally removes large archive and installer files from users' Downloads folders.
+    Files are filtered by both CreationTime and LastWriteTime against the specified
+    age threshold. Supports -WhatIf, -Confirm, and -Force.
+
+    .PARAMETER Days
+    Only remove files and folders older than this many days. Must be at least 1.
+
+    .PARAMETER TempFiles
+    Enable removal of common temporary files from user profiles.
+
+    .PARAMETER Downloads
+    Enable cleanup of users' Downloads folders (requires -ArchiveFiles or -GenericFiles).
+
+    .PARAMETER ArchiveFiles
+    Remove archive files (.zip, .rar, .7z, .iso by default) larger than ArchiveSize from Downloads.
+
+    .PARAMETER ArchiveTypes
+    File extensions to consider as archive files. Defaults to zip, rar, 7z, iso.
+
+    .PARAMETER ArchiveSize
+    Minimum file size for archive removal. Defaults to 500MB.
+
+    .PARAMETER GenericFiles
+    Remove installer/executable files (.msi, .exe by default) larger than GenericSize from Downloads.
+
+    .PARAMETER GenericTypes
+    File extensions to consider as generic installer files. Defaults to msi, exe.
+
+    .PARAMETER GenericSize
+    Minimum file size for generic file removal. Defaults to 15MB.
+
+    .PARAMETER Force
+    Suppresses implicit confirmation. Explicit -Confirm and -WhatIf take precedence.
+
+    .EXAMPLE
+    Optimize-UserProfiles -Days 30 -TempFiles
+    Removes user temp files older than 30 days.
+
+    .EXAMPLE
+    Optimize-UserProfiles -Days 60 -TempFiles -Downloads -ArchiveFiles -Force
+    Removes temp files and large archives from Downloads without confirmation.
+
+    .EXAMPLE
+    Optimize-UserProfiles -Days 30 -TempFiles -WhatIf
+    Shows what would be removed without actually deleting files.
+
+    .OUTPUTS
+    [PSCustomObject] Cleanup result with Name, Duration, SpaceBeforeGB, SpaceAfterGB, SpaceCleanedGB.
 
     .NOTES
     Author:   Tom de Leeuw
-    Website:  https://ucsystems.nl / https://tech-tom.com
+    Website:  https://systom.dev
 #>
 function Optimize-UserProfiles {
-    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Retained existing command name for compatibility.')]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([PSCustomObject])]
     param(
-        [Parameter(Mandatory = $true, Position = 0)]
+        [Parameter(Mandatory, Position = 0)]
+        [ValidateRange(1, [int]::MaxValue)]
         [int] $Days,
 
+        [Parameter()]
         [switch] $TempFiles,
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
+        [Parameter()]
         [switch] $Downloads,
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
+        [Parameter()]
         [switch] $ArchiveFiles,
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
-        [array] $ArchiveTypes = @('zip', 'rar', '7z', 'iso'),
+        [Parameter()]
+        [ValidatePattern('^[A-Za-z0-9]+$')]
+        [string[]] $ArchiveTypes = @('zip', 'rar', '7z', 'iso'),
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
-        [string] $ArchiveSize = '500MB',
+        [Parameter()]
+        [ValidateRange(0, [long]::MaxValue)]
+        [long] $ArchiveSize = 500MB,
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
+        [Parameter()]
         [switch] $GenericFiles,
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
-        [array] $GenericTypes = @('msi', 'exe'),
+        [Parameter()]
+        [ValidatePattern('^[A-Za-z0-9]+$')]
+        [string[]] $GenericTypes = @('msi', 'exe'),
 
-        [Parameter(Mandatory = $false, ParameterSetName = 'Downloads')]
-        [string] $GenericSize = '15MB'
+        [Parameter()]
+        [ValidateRange(0, [long]::MaxValue)]
+        [long] $GenericSize = 15MB,
+
+        [Parameter()]
+        [switch] $Force
     )
 
     begin {
-        # Get disk space for comparison afterwards
-        $Before = Get-DiskSpace
-
-        # Get all user folders, exclude administrators and default users
-        $Users = Get-UserFolders
-
-        # Parameters for Get-ChildItem and Remove-Item
-        $CommonParams = @{
-            Recurse       = $true
-            Force         = $true
-            Verbose       = $true
-            ErrorAction   = 'SilentlyContinue'
-            WarningAction = 'SilentlyContinue'
+        if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
+            $ConfirmPreference = 'None'
         }
+
+        Assert-RunAsAdministrator
+
+        $StopWatch  = [System.Diagnostics.Stopwatch]::StartNew()
+        $Before     = Get-DiskSpace
+        $Users      = Get-UserFolders
+        $CutoffDate = (Get-Date).AddDays(-$Days)
+
     }
 
     process {
-        ForEach ($Username In $Users) {
-            # General temp files/folders
-            if ($TempFiles -eq $true) {
-                # Folders to clean up
+        foreach ($UserName in $Users) {
+            if ($TempFiles) {
                 $TempFolders = @(
-                    '\AppData\Local\Microsoft\Windows\WER',
-                    '\AppData\Local\Microsoft\Internet Explorer\Recovery',
-                    '\AppData\Local\Microsoft\Terminal Server Client\Cache',
-                    '\AppData\Local\CrashDumps',
-                    '\AppData\Local\Temp'
+                    'AppData\Local\Microsoft\Windows\WER',
+                    'AppData\Local\Microsoft\Internet Explorer\Recovery',
+                    'AppData\Local\Microsoft\Terminal Server Client\Cache',
+                    'AppData\Local\CrashDumps',
+                    'AppData\Local\Temp'
                 )
-                ForEach ($Folder In $TempFolders) {
-                    If (Test-Path -Path "$env:SYSTEMDRIVE\Users\$Username\$Folder") {
-                        try {
-                            Get-ChildItem -Path "$env:SYSTEMDRIVE\Users\$Username\$Folder" @CommonParams |
-                                Where-Object { ($_.CreationTime -and $_.LastAccessTime -lt $(Get-Date).AddDays(-$Days)) } |
-                                    Remove-Item @CommonParams
-                        }
-                        catch {
-                            Write-Error $_
+
+                foreach ($FolderName in $TempFolders) {
+                    $FolderToClean = Join-Path -Path "$env:SYSTEMDRIVE\Users\$UserName" -ChildPath $FolderName
+                    if (Test-Path -Path $FolderToClean) {
+                        if ($PSCmdlet.ShouldProcess($FolderToClean, "Remove files older than $Days days")) {
+                            try {
+                                Remove-StaleFiles -Paths @($FolderToClean) -CutoffDate $CutoffDate -AgeMode 'CreationAndLastWrite' -Confirm:$false -ErrorAction Stop
+                            }
+                            catch {
+                                Write-Error $_
+                            }
                         }
                     }
                 }
+                Write-Verbose "Finished removing temp files for $UserName."
             }
 
-            # Downloads folder
-            if ($Downloads -eq $true) {
-                If (Test-Path -Path "$env:SYSTEMDRIVE\Users\$Username\Downloads") {
-                    # Compressed files larger than $ArchiveSize
-                    if ($ArchiveFiles -eq $true) {
-                        ForEach ($Ext In $ArchiveTypes) {
-                            try {
-                                Get-ChildItem -Path "$env:SYSTEMDRIVE\Users\$Username\Downloads\*.$Ext" @CommonParams |
-                                    Where-Object { ($_.CreationTime -and $_.LastAccessTime -lt $(Get-Date).AddDays(-$Days) -and $_.Length -gt $ArchiveSize) } |
-                                        Remove-Item @CommonParams
-                            }
-                            catch {
-                                Write-Error $_
+            if ($Downloads) {
+                $DownloadsPath = Join-Path -Path "$env:SYSTEMDRIVE\Users\$UserName" -ChildPath 'Downloads'
+                if (Test-Path -Path $DownloadsPath) {
+                    if ($ArchiveFiles) {
+                        foreach ($Ext in $ArchiveTypes) {
+                            if ($PSCmdlet.ShouldProcess("$DownloadsPath\*.$Ext (> $ArchiveSize, > $Days days)", 'Remove archive files')) {
+                                try {
+                                    Remove-StaleFiles -Paths @($DownloadsPath) -FileNamePattern "*.$Ext" -MinimumBytes $ArchiveSize -CutoffDate $CutoffDate -AgeMode CreationAndLastWrite -Confirm:$false -ErrorAction Stop
+                                }
+                                catch {
+                                    Write-Error $_
+                                }
                             }
                         }
                     }
-                    # Generic files larger than $GenericSize
-                    if ($GenericFiles -eq $true) {
-                        ForEach ($Ext In $GenericTypes) {
-                            try {
-                                Get-ChildItem -Path "$env:SYSTEMDRIVE\Users\$Username\Downloads\*.$($Ext)" @CommonParams |
-                                    Where-Object { ($_.CreationTime -and $_.LastAccessTime -lt $(Get-Date).AddDays(-$Days) -and $_.Length -gt $GenericSize) } |
-                                        Remove-Item @CommonParams
-                            }
-                            catch {
-                                Write-Error $_
+
+                    if ($GenericFiles) {
+                        foreach ($Ext in $GenericTypes) {
+                            if ($PSCmdlet.ShouldProcess("$DownloadsPath\*.$Ext (> $GenericSize, > $Days days)", 'Remove installer files')) {
+                                try {
+                                    Remove-StaleFiles -Paths @($DownloadsPath) -FileNamePattern "*.$Ext" -MinimumBytes $GenericSize -CutoffDate $CutoffDate -AgeMode CreationAndLastWrite -Confirm:$false -ErrorAction Stop
+                                }
+                                catch {
+                                    Write-Error $_
+                                }
                             }
                         }
                     }
@@ -122,16 +174,6 @@ function Optimize-UserProfiles {
     }
 
     end {
-        # Get disk space again and calculate difference
-        $After        = Get-DiskSpace
-        $TotalCleaned = "$(($After.FreeSpace - $Before.FreeSpace).ToString('00.00')) GB"
-
-        # Report
-        if ($null -ne $script:CleanupReport) {
-            $script:CleanupReport.UserProfiles = $TotalCleaned
-        }
-        else {
-            Write-Output "Total space cleaned: $TotalCleaned"
-        }
+        New-CleanupReport -Name 'UserProfiles' -StopWatch $StopWatch -DiskBefore $Before
     }
 }

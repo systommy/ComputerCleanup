@@ -2,97 +2,111 @@
     .SYNOPSIS
     Clears Microsoft Teams cache files for all users.
 
+    .DESCRIPTION
+    Closes detected Teams processes and removes selected cache directories
+    from CleanupTargets.json (excluding application databases and local storage)
+    across all user profiles. Supports -WhatIf, -Confirm, and -Force.
+
+    .PARAMETER Force
+    Suppresses implicit confirmation; explicit -Confirm and -WhatIf still take precedence.
+
+    .EXAMPLE
+    Clear-TeamsCache
+    Clears Teams cache for all users (prompts for confirmation).
+
+    .EXAMPLE
+    Clear-TeamsCache -Force
+    Clears Teams cache without confirmation.
+
+    .EXAMPLE
+    Clear-TeamsCache -WhatIf
+    Shows what would be cleaned without actually removing files.
+
+    .OUTPUTS
+    [PSCustomObject] Cleanup result with Name, Duration, SpaceBeforeGB, SpaceAfterGB, SpaceCleanedGB.
+
     .NOTES
     Author:   Tom de Leeuw
-    Website:  https://ucsystems.nl / https://tech-tom.com
+    Website:  https://systom.dev
 #>
 function Clear-TeamsCache {
-    [CmdletBinding(ConfirmImpact='Medium', SupportsShouldProcess = $true)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([PSCustomObject])]
     param(
-        # Enabling this parameter will skip confirmation.
-        [Parameter(ValuefromPipeline = $True)]
-        [Switch] $Force
+        [Parameter()]
+        [switch] $Force
     )
 
     begin {
-        # Verify if running as Administrator
+        if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
+            $ConfirmPreference = 'None'
+        }
+
         Assert-RunAsAdministrator
 
-        # Get disk space for comparison afterwards
-        $Before = Get-DiskSpace
+        $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $Before    = Get-DiskSpace
+        $Users     = Get-UserFolders
 
-        # Get all user folders, exclude administrators and default users
-        $Users = Get-UserFolders
+        $CleanupDefinitions = Get-CleanupDefinition
+        $TeamsDefinitions = $CleanupDefinitions.Teams
+        $TeamVariants = @('Classic', 'New')
 
-        # Folders to clean up
-        $Folders = @(
-            'AppData\Roaming\Microsoft\Teams\blob_storage',
-            'AppData\Roaming\Microsoft\Teams\databases',
-            'AppData\Roaming\Microsoft\Teams\cache',
-            'AppData\Roaming\Microsoft\Teams\gpucache',
-            'AppData\Roaming\Microsoft\Teams\Indexeddb',
-            'AppData\Roaming\Microsoft\Teams\Local Storage',
-            'AppData\Roaming\Microsoft\Teams\tmp'
-        )
+        $EnabledTeamVariants = New-Object System.Collections.Generic.List[string]
+        foreach ($VariantName in $TeamVariants) {
+            $Definition = $TeamsDefinitions[$VariantName]
+            if ($null -eq $Definition) {
+                continue
+            }
 
-        # Parameters for Get-ChildItem and Remove-Item
-        $CommonParams = @{
-            Recurse       = $true
-            Force         = $true
-            Verbose       = $true
-            ErrorAction   = 'SilentlyContinue'
-            WarningAction = 'SilentlyContinue'
+            $IsInstalled = $false
+            foreach ($RegistryPath in @($Definition.RegistryDetection)) {
+                if (Test-RegistryPathExists -Path $RegistryPath) {
+                    $IsInstalled = $true
+                    break
+                }
+            }
+
+            if ($IsInstalled) {
+                $EnabledTeamVariants.Add($VariantName)
+            }
+            else {
+                Write-Verbose "Skipping Teams variant '$VariantName' because no installation registry keys were found."
+            }
         }
+
+        $TeamsProcesses = @(
+            foreach ($VariantName in $EnabledTeamVariants) {
+                @($TeamsDefinitions[$VariantName].ProcessName)
+            }
+        ) | Select-Object -Unique
     }
 
     process {
-        Write-Verbose "Starting Teams Cache cleanup process..."
+        Write-Verbose 'Starting Teams Cache cleanup process...'
 
-        # Prompt for user verification before continuing
-        if ( -not ($Force)) {
-            Get-UserConfirmation -WarningMessage "This will stop all running Teams processes!"
-        }
-
-        # Kill Teams process(es)
-        try {
-            Write-Verbose "Killing Teams process(es)..."
-            Get-Process -ProcessName 'Teams' -ErrorAction 'Stop' | Stop-Process -Force -Confirm:$false
-        }
-        catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
-            Write-Information "No running $($_.Exception.ProcessName) processes."
-        }
-        catch {
-            Write-Error "$($_.Exception.Message)"
+        if (-not $PSCmdlet.ShouldProcess('Teams caches across selected local profiles', 'Close matching processes and permanently remove selected cache data')) { return }
+        if (@($TeamsProcesses).Count -gt 0) {
+            Stop-ProcessGracefully -ProcessNames $TeamsProcesses -Confirm:$false
         }
 
-        # Start cleaning files
-        ForEach ($UserName In $Users) {
-            ForEach ($FolderName In $Folders) {
-                If (Test-Path -Path "$env:SYSTEMDRIVE\Users\$UserName\$FolderName") {
-                    try {
-                        Get-ChildItem -Path "$env:SYSTEMDRIVE\Users\$UserName\$FolderName" @CommonParams | Remove-Item @CommonParams
-                    }
-                    catch {
-                        Write-Error $_
-                    }
+        foreach ($UserName in $Users) {
+            $UserProfilePath = Join-Path -Path "$env:SYSTEMDRIVE\Users" -ChildPath $UserName
+
+            foreach ($VariantName in $EnabledTeamVariants) {
+                $Definition = $TeamsDefinitions[$VariantName]
+                $FoldersToClean = Get-ExpandedUserRelativePaths -UserProfilePath $UserProfilePath -RelativePaths @($Definition.RelativePaths)
+
+                foreach ($FolderToClean in $FoldersToClean) {
+                    Remove-StaleFiles -Paths @($FolderToClean) -AgeMode 'None' -Confirm:$false -ErrorAction Stop
                 }
             }
-            Write-Verbose "Removed Teams Cache files for $UserName."
+
+            Write-Verbose "Finished removing Teams Cache files for $UserName."
         }
     }
 
     end {
-        # Get disk space again and calculate difference
-        $After        = Get-DiskSpace
-        $TotalCleaned = "$(($After.FreeSpace - $Before.FreeSpace).ToString('00.00')) GB"
-
-        # Report
-        if ($null -ne $script:CleanupReport) {
-            $script:CleanupReport.TeamsCache = $TotalCleaned
-        }
-        else {
-            Write-Output "Total space cleaned: $TotalCleaned"
-        }
+        New-CleanupReport -Name 'TeamsCache' -StopWatch $StopWatch -DiskBefore $Before
     }
 }
-

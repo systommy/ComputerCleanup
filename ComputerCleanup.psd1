@@ -12,10 +12,11 @@
 RootModule = 'ComputerCleanup.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.1.6'
+ModuleVersion = '3.0.0'
 
 # Supported PSEditions
-CompatiblePSEditions = 'Desktop'
+# Desktop + Core - module supports Windows PowerShell 5.1 and PowerShell 7+ on Windows
+CompatiblePSEditions = @('Desktop', 'Core')
 
 # ID used to uniquely identify this module
 GUID = '560a6a80-ba3a-4a98-95b9-e61546aa3307'
@@ -24,16 +25,16 @@ GUID = '560a6a80-ba3a-4a98-95b9-e61546aa3307'
 Author = 'Tom de Leeuw'
 
 # Company or vendor of this module
-CompanyName = 'Tech-Tom.com'
+CompanyName = 'SysTom'
 
 # Copyright statement for this module
-Copyright = '(c) Tom de Leeuw. All rights reserved.'
+Copyright = '(c) 2026 Tom de Leeuw. Licensed under the MIT License.'
 
 # Description of the functionality provided by this module
-Description = 'Module for freeing up disk space / removing temp files etc.'
+Description = 'Windows maintenance module with explicit cleanup selection, guarded file deletion, service recovery and disk-space reporting.'
 
 # Minimum version of the PowerShell engine required by this module
-# PowerShellVersion = 5.1
+PowerShellVersion = '5.1'
 
 # Name of the PowerShell host required by this module
 # PowerShellHostName = ''
@@ -69,16 +70,25 @@ Description = 'Module for freeing up disk space / removing temp files etc.'
 # NestedModules = @()
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = '*'
+FunctionsToExport = @(
+    'Invoke-ComputerCleanup',
+    'Clear-BrowserCache',
+    'Clear-FontCache',
+    'Clear-SoftwareDistribution',
+    'Clear-TeamsCache',
+    'Invoke-CleanManager',
+    'Optimize-SystemFiles',
+    'Optimize-UserProfiles'
+)
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
-CmdletsToExport = '*'
+CmdletsToExport = @()
 
 # Variables to export from this module
-VariablesToExport = '*'
+VariablesToExport = @()
 
 # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
-AliasesToExport = '*'
+AliasesToExport = @()
 
 # DSC resources to export from this module
 # DscResourcesToExport = @()
@@ -87,7 +97,35 @@ AliasesToExport = '*'
 # ModuleList = @()
 
 # List of all files packaged with this module
-# FileList = @()
+FileList = @(
+    'ComputerCleanup.psd1',
+    'ComputerCleanup.psm1',
+    'CleanupTargets.json',
+    'LICENSE',
+    'Public\Invoke-ComputerCleanup.ps1',
+    'Public\Optimize-UserProfiles.ps1',
+    'Public\Optimize-SystemFiles.ps1',
+    'Public\Clear-BrowserCache.ps1',
+    'Public\Clear-TeamsCache.ps1',
+    'Public\Clear-FontCache.ps1',
+    'Public\Clear-SoftwareDistribution.ps1',
+    'Public\Invoke-CleanManager.ps1',
+    'Private\Assert-RunAsAdministrator.ps1',
+    'Private\Get-DiskSpace.ps1',
+    'Private\Get-UserFolders.ps1',
+    'Private\Start-Logging.ps1',
+    'Private\New-CleanupReport.ps1',
+    'Private\New-HtmlCleanupReport.ps1',
+    'Private\Get-CleanupDefinition.ps1',
+    'Private\Test-RegistryPathExists.ps1',
+    'Private\Get-ExpandedUserRelativePaths.ps1',
+    'Private\Stop-ProcessGracefully.ps1',
+    'Private\Stop-ServiceSet.ps1',
+    'Private\Start-ServiceSet.ps1',
+    'Private\Remove-StaleFiles.ps1',
+    'Private\Test-SafeCleanupPath.ps1',
+    'Private\Get-SafeCleanupItem.ps1'
+)
 
 # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
 PrivateData = @{
@@ -95,19 +133,19 @@ PrivateData = @{
     PSData = @{
 
         # Tags applied to this module. These help with module discovery in online galleries.
-        # Tags = @()
+        Tags = @('Cleanup', 'DiskSpace', 'TempFiles', 'Maintenance', 'RDS', 'Windows', 'Cache', 'BrowserCache', 'Administration')
 
         # A URL to the license for this module.
-        # LicenseUri = ''
+        LicenseUri = 'https://github.com/systommy/ComputerCleanup/blob/main/LICENSE'
 
         # A URL to the main website for this project.
-        # ProjectUri = ''
+        ProjectUri = 'https://github.com/systommy/ComputerCleanup'
 
         # A URL to an icon representing this module.
         # IconUri = ''
 
         # ReleaseNotes of this module
-        # ReleaseNotes = ''
+        ReleaseNotes = '3.0.0: major safety rewrite with breaking changes from 1.x. See https://github.com/systommy/ComputerCleanup/blob/main/CHANGELOG.md'
 
         # Prerelease string of this module
         # Prerelease = ''
@@ -129,4 +167,5 @@ PrivateData = @{
 # DefaultCommandPrefix = ''
 
 }
+
 
